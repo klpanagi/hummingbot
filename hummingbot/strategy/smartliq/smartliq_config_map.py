@@ -75,6 +75,25 @@ smartliq_config_map ={
                   type_str="decimal",
                   validator=lambda v: validate_decimal(v, 0, 100, inclusive=False),
                   prompt_on_new=True),
+    "inventory_skew_enabled":
+        ConfigVar(key="inventory_skew_enabled",
+                  prompt="Would you like to enable inventory skew? (Yes/No) >>> ",
+                  type_str="bool",
+                  default=True,
+                  validator=validate_bool),
+    "target_base_pct":
+        ConfigVar(key="target_base_pct",
+                  prompt="For each pair, what is your target base asset percentage? (Enter 50 to indicate 50%) >>> ",
+                  type_str="decimal",
+                  validator=lambda v: validate_decimal(v, 0, 100, inclusive=False),
+                  default=50,
+                  prompt_on_new=False),
+    "inventory_range_multiplier":
+        ConfigVar(key="inventory_range_multiplier",
+                  prompt="What is your tolerable range of inventory around the target, expressed in multiples of your total order size? ",
+                  type_str="decimal",
+                  validator=lambda v: validate_decimal(v, min_value=0, inclusive=False),
+                  default=Decimal("1")),
     "order_refresh_time":
         ConfigVar(key="order_refresh_time",
                   prompt="How often do you want to cancel and replace bids and asks (in seconds)? >>> ",
@@ -91,12 +110,12 @@ smartliq_config_map ={
         ConfigVar(key="volatility_interval",
                   prompt="What is an interval, in second, in which to pick historical mid price data from to calculate market volatility? >>> ",
                   type_str="int",
-                  default=10),
+                  default=2),
     "avg_volatility_period":
         ConfigVar(key="avg_volatility_period",
                   prompt="How many interval samples to use to calculate average market volatility? >>> ",
                   type_str="int",
-                  default=2),
+                  default=15),
     "volatility_to_spread_multiplier":
         ConfigVar(key="volatility_to_spread_multiplier",
                   prompt="Enter a multiplier used to convert average volatility to spread (enter 1 for 1 to 1 conversion) >>> ",

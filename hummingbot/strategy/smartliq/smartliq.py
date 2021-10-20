@@ -22,6 +22,9 @@ from hummingbot.core.clock import Clock
 from hummingbot.core.utils.estimate_fee import estimate_fee
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.connector.exchange_base import ExchangeBase
+from hummingbot.strategy.pure_market_making.inventory_skew_calculator import (
+    calculate_bid_ask_ratios_from_base_asset_ratio
+)
 
 
 hws_logger = None
@@ -75,32 +78,37 @@ class SmartLiquidity(StrategyPyBase):
             hws_logger = logging.getLogger(__name__)
         return hws_logger
 
-    def __init__(self,
-                 exchange: ExchangeBase,
-                 market_info: MarketTradingPairTuple,
-                 token: str = 'USDT',
-                 order_amount: Decimal = Decimal(50),
-                 spread: Decimal = Decimal(1),
-                 order_refresh_time: float = 10.0,
-                 order_refresh_tolerance_pct: Decimal = Decimal(0.01),
-                 volatility_interval: int = 2,
-                 avg_volatility_period: int = 15,
-                 volatility_to_spread_multiplier: Decimal = Decimal("1"),
-                 rsi_period: int = 14,
-                 rsi_overbought: int = 70,
-                 rsi_oversold: int = 30,
-                 rsi_interval: int = 60,
-                 max_spread: Decimal = Decimal("-1"),
-                 max_order_age: float = 60. * 60.,
-                 hb_app_notification: bool = False
-                 ):
-
-        super().__init__()
+    def init_params(self,
+                    exchange: ExchangeBase,
+                    market_info: MarketTradingPairTuple,
+                    token: str = 'USDT',
+                    order_amount: Decimal = Decimal(50),
+                    spread: Decimal = Decimal(1),
+                    inventory_skew_enabled: bool = True,
+                    target_base_pct: Decimal = Decimal("50"),
+                    inventory_range_multiplier: Decimal = Decimal("1"),
+                    order_refresh_time: float = 10.0,
+                    order_refresh_tolerance_pct: Decimal = Decimal(0.01),
+                    volatility_interval: int = 2,
+                    avg_volatility_period: int = 15,
+                    volatility_to_spread_multiplier: Decimal = Decimal("1"),
+                    rsi_period: int = 14,
+                    rsi_overbought: int = 70,
+                    rsi_oversold: int = 30,
+                    rsi_interval: int = 60,
+                    max_spread: Decimal = Decimal("-1"),
+                    max_order_age: float = 60. * 60.,
+                    hb_app_notification: bool = False
+                    ):
         self._exchange = exchange
+        self.logger().info(f'EXCHANGE: {self._exchange}')
         self._market_info = market_info
         self._token = token
         self._order_amount = order_amount
         self._spread = spread
+        self._inventory_skew_enabled = inventory_skew_enabled
+        self._target_base_pct = target_base_pct
+        self._inventory_range_multiplier = inventory_range_multiplier
         self._order_refresh_time = order_refresh_time
         self._order_refresh_tolerance_pct = order_refresh_tolerance_pct
         self._volatility_interval = volatility_interval
@@ -116,18 +124,24 @@ class SmartLiquidity(StrategyPyBase):
         self._hb_app_notification = hb_app_notification
         # Initialization
         self._rsi_open_position = False
-        self._rsi_last = 100.0
+        self._rsi = 100.0
         self._last_vol_reported = 0.
         self._connector_ready = False
+        self._ready_to_trade = False
         self._last_vol_reported = 0.
-        self._last_rsi_reported = 0.
+        self._rsi_reported = 0.
         self._volatility = s_decimal_nan
         self._token_balances = {}
-        self._sell_budgets = {}
-        self._buy_budgets = {}
+        self._sell_budget = s_decimal_zero
+        self._buy_budget = s_decimal_zero
+        self._refresh_time = 0
 
         self._ev_loop = asyncio.get_event_loop()
         self.add_markets([market_info.market])
+
+    @property
+    def market(self):
+        return self._market_info.trading_pair
 
     @property
     def active_orders(self):
@@ -143,7 +157,7 @@ class SmartLiquidity(StrategyPyBase):
 
     @property
     def buy_budgets(self):
-        return self._buy_budgets
+        return self._buy_budget
 
     def cancel_active_orders(self, proposals: List[Proposal]):
         """
@@ -154,14 +168,14 @@ class SmartLiquidity(StrategyPyBase):
             cur_orders = [o for o in self.active_orders if o.trading_pair == proposal.market]
             if cur_orders and any(order_age(o) > self._max_order_age for o in cur_orders):
                 to_cancel = True
-            elif self._refresh_times[proposal.market] <= self.current_timestamp and \
+            elif self._refresh_time <= self.current_timestamp and \
                     cur_orders and not self.is_within_tolerance(cur_orders, proposal):
                 to_cancel = True
             if to_cancel:
                 for order in cur_orders:
-                    self.cancel_order(self._market_infos[proposal.market], order.client_order_id)
+                    self.cancel_order(self._market_info, order.client_order_id)
                     # To place new order on the next tick
-                    self._refresh_times[order.trading_pair] = self.current_timestamp + 0.1
+                    self._refresh_time = self.current_timestamp + 0.1
 
     def execute_orders_proposal(self, proposals: List[Proposal]):
         """
@@ -170,9 +184,9 @@ class SmartLiquidity(StrategyPyBase):
         """
         for proposal in proposals:
             cur_orders = [o for o in self.active_orders if o.trading_pair == proposal.market]
-            if cur_orders or self._refresh_times[proposal.market] > self.current_timestamp:
+            if cur_orders or self._refresh_time > self.current_timestamp:
                 continue
-            mid_price = self._market_infos[proposal.market].get_mid_price()
+            mid_price = self._market_info.get_mid_price()
             spread = s_decimal_zero
             if proposal.buy.size > 0:
                 spread = abs(proposal.buy.price - mid_price) / mid_price
@@ -180,7 +194,7 @@ class SmartLiquidity(StrategyPyBase):
                                    f"{proposal.buy.size * proposal.buy.price:.2f} {proposal.quote()} spread: "
                                    f"{spread:.2%}")
                 self.buy_with_specific_market(
-                    self._market_infos[proposal.market],
+                    self._market_info,
                     proposal.buy.size,
                     order_type=OrderType.LIMIT_MAKER,
                     price=proposal.buy.price
@@ -191,7 +205,7 @@ class SmartLiquidity(StrategyPyBase):
                                    f"{proposal.sell.size * proposal.sell.price:.2f} {proposal.quote()} spread: "
                                    f"{spread:.2%}")
                 self.sell_with_specific_market(
-                    self._market_infos[proposal.market],
+                    self._market_info,
                     proposal.sell.size,
                     order_type=OrderType.LIMIT_MAKER,
                     price=proposal.sell.price
@@ -203,7 +217,7 @@ class SmartLiquidity(StrategyPyBase):
                         self.logger().info(f"({proposal.market}) Spread is widened to {spread:.2%} due to high "
                                            f"market volatility")
 
-                self._refresh_times[proposal.market] = self.current_timestamp + self._order_refresh_time
+                self._refresh_time = self.current_timestamp + self._order_refresh_time
 
     def is_token_a_quote_token(self):
         """
@@ -257,16 +271,38 @@ class SmartLiquidity(StrategyPyBase):
                 adjusted_bals[base] += order.quantity
         return adjusted_bals
 
+    def apply_inventory_skew(self, proposals: List[Proposal]):
+        """
+        Apply an inventory split between the quote and base asset
+        """
+        for proposal in proposals:
+            buy_budget = self._buy_budget
+            sell_budget = self._sell_budget
+            mid_price = self._market_info.get_mid_price()
+            total_order_size = proposal.sell.size + proposal.buy.size
+            bid_ask_ratios = calculate_bid_ask_ratios_from_base_asset_ratio(
+                float(sell_budget),
+                float(buy_budget),
+                float(mid_price),
+                float(self._target_base_pct),
+                float(total_order_size * self._inventory_range_multiplier)
+            )
+            proposal.buy.size *= Decimal(bid_ask_ratios.bid_ratio)
+            proposal.sell.size *= Decimal(bid_ask_ratios.ask_ratio)
+
+
     # After initializing the required variables, we define the tick method.
     # The tick method is the entry point for the strategy.
     def tick(self, timestamp: float):
-        if not self._connector_ready:
-            self._connector_ready = self._market_info.market.ready
-            if not self._connector_ready:
-                self.logger().warning(f"{self._market_info.market.name} is not ready. Please wait...")
+        if not self._ready_to_trade:
+            # Check if there are restored orders, they should be canceled before strategy starts.
+            self._ready_to_trade = self._exchange.ready and len(self._exchange.limit_orders) == 0
+            if not self._exchange.ready:
+                self.logger().warning(f"{self._exchange.name} is not ready. Please wait...")
                 return
             else:
-                self.logger().warning(f"{self._market_info.market.name} is ready. Trading started")
+                self.logger().info(f"{self._exchange.name} is ready. Trading started.")
+                self.create_budget_allocation()
         self.update_mid_price()
         self.update_volatility()
         self.update_rsi()
@@ -282,7 +318,7 @@ class SmartLiquidity(StrategyPyBase):
         self._last_timestamp = timestamp
 
     def decision(self):
-        if self._rsi_last > self._rsi_overbought:
+        if self._rsi > self._rsi_overbought:
             if self._rsi_open_position:
                 self.logger().info("Overbought! SELL!")
                 self.sell_with_specific_market(
@@ -294,7 +330,7 @@ class SmartLiquidity(StrategyPyBase):
                 self._rsi_open_position = False
             else:
                 pass
-        elif self._rsi_last < self._rsi_oversold:
+        elif self._rsi < self._rsi_oversold:
             if self._rsi_open_position:
                 pass
             else:
@@ -368,19 +404,20 @@ class SmartLiquidity(StrategyPyBase):
         """
         data = []
         columns = ["Market", "Mid price", "Best bid", "Best ask", "Volatility"]
-        for market, market_info in self._market_infos.items():
-            mid_price = market_info.get_mid_price()
-            best_bid = self._exchange.get_price(market, False)
-            best_ask = self._exchange.get_price(market, True)
-            best_bid_pct = abs(best_bid - mid_price) / mid_price
-            best_ask_pct = (best_ask - mid_price) / mid_price
-            data.append([
-                market,
-                float(mid_price),
-                f"{best_bid_pct:.2%}",
-                f"{best_ask_pct:.2%}",
-                "" if self._volatility.is_nan() else f"{self._volatility:.2%}",
-            ])
+        market_info = self._market_info
+        market = self.market
+        mid_price = market_info.get_mid_price()
+        best_bid = self._exchange.get_price(market, False)
+        best_ask = self._exchange.get_price(market, True)
+        best_bid_pct = abs(best_bid - mid_price) / mid_price
+        best_ask_pct = (best_ask - mid_price) / mid_price
+        data.append([
+            market,
+            float(mid_price),
+            f"{best_bid_pct:.2%}",
+            f"{best_ask_pct:.2%}",
+            "" if self._volatility.is_nan() else f"{self._volatility:.2%}",
+        ])
         df = pd.DataFrame(data=data, columns=columns).replace(np.nan, '', regex=True)
         df.sort_values(by=["Market"], inplace=True)
         return df
@@ -456,15 +493,15 @@ class SmartLiquidity(StrategyPyBase):
                       f"{market_info.base_asset} is filled."
                 self.log_with_clock(logging.INFO, msg)
                 self.notify_hb_app_with_timestamp(msg)
-                self._buy_budgets[market_info.trading_pair] -= (event.amount * event.price)
-                self._sell_budgets[market_info.trading_pair] += event.amount
+                self._buy_budget -= (event.amount * event.price)
+                self._sell_budget += event.amount
             else:
                 msg = f"({market_info.trading_pair}) Maker SELL order (price: {event.price}) of {event.amount} " \
                       f"{market_info.base_asset} is filled."
                 self.log_with_clock(logging.INFO, msg)
                 self.notify_hb_app_with_timestamp(msg)
-                self._sell_budgets[market_info.trading_pair] -= event.amount
-                self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
+                self._sell_budget -= event.amount
+                self._buy_budget += (event.amount * event.price)
 
     def start(self, clock: Clock, timestamp: float):
         restored_orders = self._exchange.limit_orders
@@ -492,7 +529,8 @@ class SmartLiquidity(StrategyPyBase):
         sell_price = mid_price * (Decimal("1") + spread)
         sell_price = self._exchange.quantize_order_price(market, sell_price)
         sell_size = self.base_order_size(market, sell_price)
-        proposals.append(Proposal(market, PriceSize(buy_price, buy_size), PriceSize(sell_price, sell_size)))
+        proposals.append(Proposal(market, PriceSize(buy_price, buy_size),
+                                  PriceSize(sell_price, sell_size)))
         return proposals
 
     def total_port_value_in_token(self) -> Decimal:
@@ -516,8 +554,6 @@ class SmartLiquidity(StrategyPyBase):
         """
         market_info = self._market_info
         market = self.market
-        self._sell_budget = {self._market_info.market.name: s_decimal_zero}
-        self._buy_budget = {self._market_info.market.name: s_decimal_zero}
         portfolio_value = self.total_port_value_in_token()
         market_portion = portfolio_value
         balances = self.adjusted_available_balances()
@@ -538,7 +574,7 @@ class SmartLiquidity(StrategyPyBase):
         if self._token == base:
             return self._order_amount
         if price == s_decimal_zero:
-            price = self._market_infos[trading_pair].get_mid_price()
+            price = self._market_info.get_mid_price()
         return self._order_amount / price
 
     def apply_budget_constraint(self, proposals: List[Proposal]):
@@ -616,21 +652,24 @@ class SmartLiquidity(StrategyPyBase):
 
     def update_rsi(self):
         if len(self._mid_prices) >= self._rsi_interval:
-            if self._last_rsi_reported < self.current_timestamp - self._rsi_interval:
-                rsi = self.calculate_rsi(self._mid_prices)
-                rsi2 = self.calc_rsi(self._mid_prices)
+            if self._rsi_reported < self.current_timestamp - self._rsi_interval:
+                rsi = self.calculate_rsi(self._mid_prices[- self._rsi_interval:])
+                rsi2 = self.calc_rsi(self._mid_prices[- self._rsi_interval:])
                 if rsi is None or rsi2 is None:
                     return
                 last_rsi = rsi.iloc[-1]
                 last_rsi2 = rsi2.iloc[-1]
 
-                self._rsi_last = last_rsi
-                self._last_rsi_reported = self.current_timestamp
+                self._rsi = mean(rsi)
+                self._rsi_reported = self.current_timestamp
                 self.logger().info(f"RSI: {last_rsi}")
+                self.logger().info(f"RSI Mean: {self._rsi}")
                 self.logger().info(f"RSI2: {last_rsi2}")
+                self.logger().info(f"RSI2 Mean: {mean(rsi2)}")
+        else:
+            self.logger().info('Not enough samples to calculate RSI')
 
     def calculate_rsi(self, prices):
-        rsi = 0
         rsi = ta.momentum.rsi(pd.Series(np.array(prices)),
                               self._rsi_period, False)
         return rsi
@@ -650,5 +689,6 @@ class SmartLiquidity(StrategyPyBase):
         downs = downs.drop(downs.index[:(period-1)])
         rs = ups.ewm(com=period-1,min_periods=0,adjust=False,ignore_na=False).mean() / \
              downs.ewm(com=period-1,min_periods=0,adjust=False,ignore_na=False).mean() 
-        return 100 - 100 / (1 + rs)
+        rsi = 100 - 100 / (1 + rs)
+        return rsi
 

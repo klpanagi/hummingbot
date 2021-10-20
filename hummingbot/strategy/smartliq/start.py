@@ -20,11 +20,13 @@ def start(self):
     max_order_age = c_map.get("max_order_age").value
 
     self._initialize_markets([(exchange, [market])])
+    exchange = self.markets[exchange]
     base, quote = market.split("-")
-    market_info = MarketTradingPairTuple(self.markets[exchange], market, base, quote)
+    market_info = MarketTradingPairTuple(exchange, market, base, quote)
     self.market_trading_pair_tuples = [market_info]
 
-    self.strategy = SmartLiquidity(
+    self.strategy = SmartLiquidity()
+    self.strategy.init_params(
         exchange=exchange,
         market_info=market_info,
         token=token,
