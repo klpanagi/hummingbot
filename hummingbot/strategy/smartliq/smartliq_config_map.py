@@ -136,22 +136,22 @@ smartliq_config_map ={
                   default=60. * 60.),
     "rsi_period":
         ConfigVar(key="rsi_period",
-                  prompt="RSI period. Default is 14",
+                  prompt="RSI period (Default is 14) >>> ",
                   type_str="int",
                   default=14),
     "rsi_overbought":
         ConfigVar(key="rsi_overbought",
-                  prompt="RSI Overbought value. Default is 70",
+                  prompt="RSI Overbought value (Default is 70) >>> ",
                   type_str="int",
                   default=70),
     "rsi_oversold":
         ConfigVar(key="rsi_oversold",
-                  prompt="RSI Oversold value. Default is 30",
+                  prompt="RSI Oversold value (Default is 30) >>> ",
                   type_str="int",
                   default=30),
     "rsi_interval":
         ConfigVar(key="rsi_interval",
-                  prompt="RSI interval value in seconds. Default is 60 seconds",
+                  prompt="RSI interval value in seconds (Default is 60 seconds) >>> ",
                   type_str="int",
                   default=60),
 }

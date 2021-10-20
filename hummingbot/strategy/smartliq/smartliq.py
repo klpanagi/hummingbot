@@ -630,6 +630,13 @@ class SmartLiquidity(StrategyPyBase):
             max_len = self._rsi_interval
         self._mid_prices = self._mid_prices[-1 * max_len:]
 
+    def update_bar_price(self):
+        """
+        Update mean bar price data from the market
+        """
+        if self.current_timestamp - self._last_rep_bar > self._bar_period:
+            self._bar_prices.append(mean(self._mid_prices[- self.bar_period:]))
+
     def update_volatility(self):
         """
         Update volatility data from the market
@@ -653,25 +660,26 @@ class SmartLiquidity(StrategyPyBase):
     def update_rsi(self):
         if len(self._mid_prices) >= self._rsi_interval:
             if self._rsi_reported < self.current_timestamp - self._rsi_interval:
-                rsi = self.calculate_rsi(self._mid_prices[- self._rsi_interval:])
-                rsi2 = self.calc_rsi(self._mid_prices[- self._rsi_interval:])
+                rsi = self.calculate_rsi(self._mid_prices)
+                rsi2 = self.calc_rsi(self._mid_prices)
                 if rsi is None or rsi2 is None:
                     return
                 last_rsi = rsi.iloc[-1]
                 last_rsi2 = rsi2.iloc[-1]
 
-                self._rsi = mean(rsi)
                 self._rsi_reported = self.current_timestamp
                 self.logger().info(f"RSI: {last_rsi}")
-                self.logger().info(f"RSI Mean: {self._rsi}")
                 self.logger().info(f"RSI2: {last_rsi2}")
-                self.logger().info(f"RSI2 Mean: {mean(rsi2)}")
+                rsi_mean = mean(rsi[- self._rsi_interval:])
+                rsi2_mean = mean(rsi2[- self._rsi_interval:])
+                self.logger().info(f"RSI Mean: {rsi_mean}")
+                self.logger().info(f"RSI2 Mean: {rsi2_mean}")
         else:
             self.logger().info('Not enough samples to calculate RSI')
 
     def calculate_rsi(self, prices):
         rsi = ta.momentum.rsi(pd.Series(np.array(prices)),
-                              self._rsi_period, False)
+                              self._rsi_period, True)
         return rsi
 
     def calc_rsi(self, prices):
