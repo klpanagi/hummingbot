@@ -1,0 +1,20 @@
+template_version: 1
+strategy: null
+# The exchange to run this strategy.
+exchange: null
+market: null
+
+# The asset (base or quote) to use to provide liquidity
+token: null
+
+# The size of each order in specified token amount
+order_amount: null
+
+# The range around the inventory target base percent to maintain, expressed in multiples of total order size (for
+# inventory skew feature).
+inventory_range_multiplier: null
+
+rsi_period: null
+rsi_overbought: null
+rsi_oversold: null
+rsi_interval: null

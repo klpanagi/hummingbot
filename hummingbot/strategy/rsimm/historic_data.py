@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 
 from datetime import datetime
-import time
-import pandas as pd
+# import pandas as pd
 from fastquant import get_crypto_data
-from fastquant import backtest
 
 
-## '1w', '1d' (default), '1h', '1m'
+# '1w', '1d' (default), '1h', '1m'
 def get_historic_data(pair, time_from, time_to, resolution="1m"):
     """Get historic data for crypto pairs.
 
@@ -16,6 +14,7 @@ def get_historic_data(pair, time_from, time_to, resolution="1m"):
     """
     data = get_crypto_data(pair, time_from, time_to, resolution)
     return data
+
 
 if __name__ == '__main__':
     pair = "BTC/USDT"

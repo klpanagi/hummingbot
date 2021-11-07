@@ -1,8 +1,8 @@
 from decimal import Decimal
 
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from hummingbot.strategy.smartliq import SmartLiquidity
-from hummingbot.strategy.smartliq.smartliq_config_map import smartliq_config_map as c_map
+from hummingbot.strategy.rsimm import SmartLiquidity
+from hummingbot.strategy.rsimm.rsimm_config_map import rsimm_config_map as c_map
 
 
 def start(self):
