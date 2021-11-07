@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-import time
+# import time
 import logging
 from decimal import Decimal
 from statistics import mean
@@ -170,7 +170,7 @@ class SmartLiquidity(StrategyPyBase):
     def buy_budgets(self):
         return self._buy_budget
 
-    def cancel_active_orders(self, proposal: Proposal):
+    def cancel_active_order(self, proposal: Proposal):
         """
         Cancel any orders that have an order age greater than self._max_order_age or if orders are not within tolerance
         """
@@ -305,7 +305,6 @@ class SmartLiquidity(StrategyPyBase):
         proposal.buy.size *= Decimal(bid_ask_ratios.bid_ratio)
         proposal.sell.size *= Decimal(bid_ask_ratios.ask_ratio)
 
-
     # After initializing the required variables, we define the tick method.
     # The tick method is the entry point for the strategy.
     def tick(self, timestamp: float):
@@ -329,7 +328,7 @@ class SmartLiquidity(StrategyPyBase):
         if self._inventory_skew_enabled:
             self.apply_inventory_skew(proposal)
         self.apply_budget_constraint(proposal)
-        self.cancel_active_orders(proposal)
+        self.cancel_active_order(proposal)
         self.execute_orders_proposal(proposal)
         self._last_timestamp = timestamp
 
@@ -552,8 +551,11 @@ class SmartLiquidity(StrategyPyBase):
         sell_price = mid_price * (Decimal("1") + spread)
         sell_price = self._exchange.quantize_order_price(market, sell_price)
         sell_size = self.base_order_size(market, sell_price)
-        proposal = Proposal(market, PriceSize(buy_price, buy_size),
-                                  PriceSize(sell_price, sell_size))
+        proposal = Proposal(
+            market,
+            PriceSize(buy_price, buy_size),
+            PriceSize(sell_price, sell_size)
+        )
         return proposal
 
     def total_port_value_in_token(self) -> Decimal:
@@ -649,7 +651,7 @@ class SmartLiquidity(StrategyPyBase):
         # To avoid memory leak, we store only the last part of the list needed
         # for volatility/rsi calculation
         max_len = self._avg_volatility_period * self._volatility_interval
-        if  self._rsi_interval > max_len:
+        if self._rsi_interval > max_len:
             max_len = self._rsi_interval
         if self._bar_period > max_len:
             max_len = self._bar_period
@@ -696,9 +698,11 @@ class SmartLiquidity(StrategyPyBase):
                                  self._historic_data_to,
                                  resolution=self._historic_data_resolution)
         self.logger().info('Finished downloading historic data.')
-        self.logger().info(f'Historic data [{self._historic_data_from}, ' +
-              f'{self._historic_data_to}] for <{pair}>: ' +
-              f'Len={data.size}, Resolution={self._historic_data_resolution}')
+        self.logger().info(
+            f'Historic data [{self._historic_data_from}, ' +
+            f'{self._historic_data_to}] for <{pair}>: ' +
+            f'Len={data.size}, Resolution={self._historic_data_resolution}'
+        )
         self._historic_data = data['close']
         print(self._historic_data)
         print(type(self._historic_data))
@@ -731,17 +735,24 @@ class SmartLiquidity(StrategyPyBase):
 
     def calc_rsi(self, prices):
         period = self._rsi_period
-        delta =  prices.diff().dropna()
+        delta = prices.diff().dropna()
         ups = delta * 0
         downs = ups.copy()
         ups[delta > 0] = delta[delta > 0]
         downs[delta < 0] = -delta[delta < 0]
-        ups[ups.index[period-1]] = np.mean( ups[:period] ) #first value is sum of avg gains
-        ups = ups.drop(ups.index[:(period-1)])
-        downs[downs.index[period-1]] = np.mean( downs[:period] ) #first value is sum of avg losses
-        downs = downs.drop(downs.index[:(period-1)])
-        rs = ups.ewm(com=period-1,min_periods=0,adjust=False,ignore_na=False).mean() / \
-             downs.ewm(com=period-1,min_periods=0,adjust=False,ignore_na=False).mean() 
+        # first value is sum of avg gains
+        ups[ups.index[period - 1]] = np.mean(ups[:period])
+        ups = ups.drop(ups.index[:(period - 1)])
+        # first value is sum of avg losses
+        downs[downs.index[period - 1]] = np.mean(downs[:period])
+        downs = downs.drop(downs.index[:(period - 1)])
+        rs = ups.ewm(com=period - 1,
+                     min_periods=0,
+                     adjust=False,
+                     ignore_na=False).mean() / \
+            downs.ewm(com=period - 1,
+                      min_periods=0,
+                      adjust=False,
+                      ignore_na=False).mean()
         rsi = 100 - 100 / (1 + rs)
         return rsi
-
