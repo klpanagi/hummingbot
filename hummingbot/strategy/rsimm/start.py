@@ -1,7 +1,5 @@
-from decimal import Decimal
-
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from hummingbot.strategy.rsimm import SmartLiquidity
+from hummingbot.strategy.rsimm import RSIMarketMaking
 from hummingbot.strategy.rsimm.rsimm_config_map import rsimm_config_map as c_map
 
 
@@ -10,14 +8,10 @@ def start(self):
     market = c_map.get("market").value
     token = c_map.get("token").value.upper()
     order_amount = c_map.get("order_amount").value
-    spread = c_map.get("spread").value / Decimal("100")
-    order_refresh_time = c_map.get("order_refresh_time").value
-    order_refresh_tolerance_pct = c_map.get("order_refresh_tolerance_pct").value / Decimal("100")
-    volatility_interval = c_map.get("volatility_interval").value
-    avg_volatility_period = c_map.get("avg_volatility_period").value
-    volatility_to_spread_multiplier = c_map.get("volatility_to_spread_multiplier").value
-    max_spread = c_map.get("max_spread").value / Decimal("100")
-    max_order_age = c_map.get("max_order_age").value
+    rsi_period = c_map.get("rsi_period").value
+    rsi_interval = c_map.get("rsi_interval").value
+    rsi_overbought = c_map.get("rsi_overbought").value
+    rsi_oversold = c_map.get("rsi_oversold").value
 
     self._initialize_markets([(exchange, [market])])
     exchange = self.markets[exchange]
@@ -25,19 +19,15 @@ def start(self):
     market_info = MarketTradingPairTuple(exchange, market, base, quote)
     self.market_trading_pair_tuples = [market_info]
 
-    self.strategy = SmartLiquidity()
+    self.strategy = RSIMarketMaking()
     self.strategy.init_params(
         exchange=exchange,
         market_info=market_info,
         token=token,
         order_amount=order_amount,
-        spread=spread,
-        order_refresh_time=order_refresh_time,
-        order_refresh_tolerance_pct=order_refresh_tolerance_pct,
-        volatility_interval=volatility_interval,
-        avg_volatility_period=avg_volatility_period,
-        volatility_to_spread_multiplier=volatility_to_spread_multiplier,
-        max_spread=max_spread,
-        max_order_age=max_order_age,
+        rsi_period=rsi_period,
+        rsi_overbought=rsi_overbought,
+        rsi_oversold=rsi_oversold,
+        rsi_interval=rsi_interval,
         hb_app_notification=True
     )

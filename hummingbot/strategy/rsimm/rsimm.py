@@ -47,7 +47,7 @@ class PriceSize:
 
 class Proposal:
     """
-    An order proposal for liquidity mining.
+    An order proposal.
     market is the base quote pair like "ETH-USDT".
     buy is a buy order proposal.
     sell is a sell order proposal.
@@ -86,7 +86,7 @@ class RSIMarketMaking(StrategyPyBase):
                     rsi_period: int = 14,
                     rsi_overbought: int = 70,
                     rsi_oversold: int = 30,
-                    rsi_interval: int = 60,
+                    rsi_interval: int = 2,
                     historic_data_from: str = '2021-10-10',
                     historic_data_to: str = datetime.today().strftime('%Y-%m-%d'),
                     historic_data_resolution: str = '1m',
@@ -111,24 +111,21 @@ class RSIMarketMaking(StrategyPyBase):
         # Initialization
         self._rsi_open_position = False
         self._rsi = 100.0
-        self._last_vol_reported = 0.
         self._connector_ready = False
         self._ready_to_trade = False
-        self._last_vol_reported = 0.
         self._rsi_reported = 0.
-        self._volatility = s_decimal_nan
         self._token_balances = {}
         self._sell_budget = s_decimal_zero
         self._buy_budget = s_decimal_zero
         self._refresh_time = 0
         self._last_rep_bar = 0
-        self._bar_prices = []
+        self._bar_prices = pd.Series()
         self._historic_data = pd.Series()
 
         self._ev_loop = asyncio.get_event_loop()
         self.add_markets([market_info.market])
 
-        # self.fetch_historic_data()
+        self.fetch_historic_data()
 
     @property
     def market(self):
@@ -386,10 +383,10 @@ class RSIMarketMaking(StrategyPyBase):
 
     async def market_status_df(self) -> pd.DataFrame:
         """
-        Return the market status (prices, volatility) in a DataFrame
+        Return the market status (prices) in a DataFrame
         """
         data = []
-        columns = ["Market", "Mid price", "Best bid", "Best ask", "Volatility"]
+        columns = ["Market", "Mid price", "Best bid", "Best ask"]
         market_info = self._market_info
         market = self.market
         mid_price = market_info.get_mid_price()
@@ -401,8 +398,7 @@ class RSIMarketMaking(StrategyPyBase):
             market,
             float(mid_price),
             f"{best_bid_pct:.2%}",
-            f"{best_ask_pct:.2%}",
-            "" if self._volatility.is_nan() else f"{self._volatility:.2%}",
+            f"{best_ask_pct:.2%}"
         ])
         df = pd.DataFrame(data=data, columns=columns).replace(np.nan, '', regex=True)
         df.sort_values(by=["Market"], inplace=True)
@@ -585,12 +581,7 @@ class RSIMarketMaking(StrategyPyBase):
         # self.logger().info(f'Market mid-price: {mid_price}')
         self._mid_prices.append(mid_price)
         # To avoid memory leak, we store only the last part of the list needed
-        # for volatility/rsi calculation
-        max_len = self._avg_volatility_period * self._volatility_interval
-        if self._rsi_interval > max_len:
-            max_len = self._rsi_interval
-        if self._bar_period > max_len:
-            max_len = self._bar_period
+        max_len = self._rsi_period * self._bar_period
         self._mid_prices = self._mid_prices[-1 * max_len:]
 
     def update_bar_price(self):
@@ -599,8 +590,8 @@ class RSIMarketMaking(StrategyPyBase):
         """
         if self.current_timestamp - self._last_rep_bar > self._bar_period:
             bar_price = float(mean(self._mid_prices[-1 * self._bar_period:]))
-            now = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
-            self._bar_prices.append((now, bar_price))
+            _ = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+            self._bar_prices.append(pd.Series([bar_price]))
             self._last_rep_bar = self.current_timestamp
             self.logger().info(
                 f'Last Bar ({self._bar_period} seconds) mid-price: {bar_price}'
@@ -613,18 +604,22 @@ class RSIMarketMaking(StrategyPyBase):
                                  self._historic_data_from,
                                  self._historic_data_to,
                                  resolution=self._historic_data_resolution)
-        self.logger().info('Finished downloading historic data.')
+        self.logger().info(
+            f'Finished downloading historic data (size={len(data)}, resolution={self._historic_data_resolution})'
+        )
         self.logger().info(
             f'Historic data [{self._historic_data_from}, ' +
             f'{self._historic_data_to}] for <{pair}>: ' +
             f'Len={data.size}, Resolution={self._historic_data_resolution}'
         )
         self._historic_data = data['close']
-        print(self._historic_data)
-        print(type(self._historic_data))
+        self._bar_prices = self._historic_data
+        self.logger().info(f'{type(self._historic_data)}')
+        self.logger().info(f'{type(self._bar_prices)}')
+        # data = self._historic_data.append(pd.Series([k[1] for k in self._bar_prices]))
 
     def update_rsi(self):
-        data = self._historic_data.append(pd.Series([k[1] for k in self._bar_prices]))
+        data = self._bar_prices
         if data.size >= self._rsi_period:
             if self._rsi_reported < self.current_timestamp - self._rsi_interval:
                 rsi = self.calculate_rsi(data)
