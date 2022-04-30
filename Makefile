@@ -3,6 +3,7 @@
 .PHONY: run_coverage
 .PHONY: report_coverage
 .PHONY: development-diff-cover
+.PHONY: docker
 
 test:
 	coverage run -m nose --exclude-dir="test/connector" --exclude-dir="test/debug" --exclude-dir="test/mock"
@@ -18,3 +19,6 @@ report_coverage:
 development-diff-cover:
 	coverage xml
 	diff-cover --compare-branch=origin/development coverage.xml
+
+docker:
+	docker build -t coinalpha/hummingbot:${TAG} -f Dockerfile .
