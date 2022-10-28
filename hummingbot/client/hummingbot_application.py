@@ -124,9 +124,12 @@ class HummingbotApplication(*commands):
         if self.client_config_map.mqtt_broker.mqtt_logger or \
                 self.client_config_map.mqtt_broker.mqtt_notifier or \
                 self.client_config_map.mqtt_broker.mqtt_commands:
-            self.logger().info('Starting MQTT Gateway...')
             try:
                 self._mqtt = MQTTGateway(self)
+                self.logger().info('Starting MQTT Notifier')
+                self._mqtt.start_notifier()
+                self.logger().info('Starting MQTT Remote Hbot Commands')
+                self._mqtt.start_commands()
                 self._mqtt.run()
             except Exception as e:
                 self.logger().error(e)
@@ -330,6 +333,7 @@ class HummingbotApplication(*commands):
             self.strategy_name,
         )
         self.markets_recorder.start()
+        self._mqtt.start_event_fw()
 
     def _initialize_notifiers(self):
         self.notifiers.extend(
