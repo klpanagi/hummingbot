@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import time
 from collections import deque
 from typing import Deque, Dict, List, Optional, Tuple, Union
@@ -20,13 +21,10 @@ from hummingbot.client.config.config_helpers import (
 from hummingbot.client.config.gateway_ssl_config_map import SSLConfigMap
 from hummingbot.client.config.security import Security
 from hummingbot.client.config.strategy_config_data_types import BaseStrategyConfigMap
+from hummingbot.client.executor import HeadlessExecutor, TUIExecutor
 from hummingbot.client.settings import CLIENT_CONFIG_PATH, AllConnectorSettings, ConnectorType
 from hummingbot.client.tab import __all__ as tab_classes
 from hummingbot.client.tab.data_types import CommandTab
-from hummingbot.client.ui.completer import load_completer
-from hummingbot.client.ui.hummingbot_cli import HummingbotCLI
-from hummingbot.client.ui.keybindings import load_key_bindings
-from hummingbot.client.ui.parser import ThrowingArgumentParser, load_parser
 from hummingbot.connector.exchange.paper_trade import create_paper_trade_market
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.connector.markets_recorder import MarketsRecorder
@@ -106,20 +104,13 @@ class HummingbotApplication(*commands):
         self._pmm_script_iterator = None
         self._binance_connector = None
         self._shared_client = None
-
         # gateway variables and monitor
         self._gateway_monitor = GatewayStatusMonitor(self)
 
-        command_tabs = self.init_command_tabs()
-        self.parser: ThrowingArgumentParser = load_parser(self, command_tabs)
-        self.app = HummingbotCLI(
-            self.client_config_map,
-            input_handler=self._handle_command,
-            bindings=load_key_bindings(self),
-            completer=load_completer(self),
-            command_tabs=command_tabs
-        )
-
+        if os.getenv('HBOT_HAS_TUI') in ('1', 'Yes', 'yes', 'YES', 'Y', '', None):
+            self.app = TUIExecutor(self)
+        else:
+            self.app = HeadlessExecutor(self)
         self._init_gateway_monitor()
 
     @property
