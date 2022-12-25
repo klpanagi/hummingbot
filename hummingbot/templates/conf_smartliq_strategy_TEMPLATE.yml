@@ -1,0 +1,119 @@
+########################################################
+###        SmartLiquidity strategy config          ###
+########################################################
+
+template_version: 3
+strategy: null
+
+# The exchange to run this strategy.
+exchange: null
+
+# The list of markets, comma separated, e.g. LTC-USDT,ETH-USDT
+# Note: The actual markets will be determined by token below, only markets with the token specified below.
+market: null
+
+# The asset (base or quote) to use to provide liquidity
+token: null
+
+# The size of each order in specified token amount
+order_amount: null
+
+# The spread from mid price to place ask orders, enter 1 to indicate 1%
+buy_spread: null
+
+# The spread from mid price to place bid orders, enter 1 to indicate 1%
+sell_spread: null
+
+# Whether to enable Inventory skew feature (true/false).
+inventory_skew_enabled: null
+
+# The target base asset percentage for all markets, enter 50 to indicate 50% target
+inventory_target_base_pct: null
+
+# Time in seconds before cancelling and placing new orders.
+# If the value is 60, the bot cancels active orders and placing new ones after a minute.
+order_refresh_time: null
+
+# The spread (from mid price) to defer order refresh process to the next cycle.
+# (Enter 1 to indicate 1%), value below 0, e.g. -1, is to disable this feature - not recommended.
+order_refresh_tolerance_pct: null
+
+# The range around the inventory target base percent to maintain, expressed in multiples of total order size (for
+# inventory skew feature).
+inventory_range_multiplier: null
+
+# The interval, in second, in which to pick id price data from to calculate market volatility
+# E.g 300 for 5 minutes interval
+volatility_interval: null
+
+volatility_price_samples: null
+
+# The number of interval to calculate average market volatility.
+avg_volatility_samples: null
+
+# The multiplier used to convert average volatility to spread, enter 1 for 1 to 1 conversion
+volatility_to_spread_multiplier: null
+
+volatility_algorithm: null
+
+# The maximum value for spread, enter 1 to indicate 1% or -1 to ignore this setting
+max_spread: null
+
+# The maximum life time of your orders in seconds
+max_order_age: null
+
+# For more detailed information, see:
+# TODO!
+
+order_book_depth: null
+
+order_book_log_interval: null
+
+order_book_buy_position: null
+order_book_sell_position: null
+
+order_book_buy_volume_in_front: -1
+order_book_sell_volume_in_front: -1
+
+ping_pong_enabled: null
+ping_pong_initial_buy: null
+
+restart_every_seconds: null
+
+ignore_over_spread: null
+
+min_order_usdt: null
+
+filled_order_delay: null
+
+bits_behind: null
+
+# The price source (current_market/external_market/custom_api).
+price_source: null
+
+# The price type (mid_price/last_price/last_own_trade_price/best_bid/best_ask/inventory_cost).
+price_type: null
+
+# An external exchange name (for external exchange pricing source).
+price_source_exchange: null
+
+# A trading pair for the external exchange, e.g. BTC-USDT (for external exchange pricing source).
+price_source_market: null
+
+# An external api that returns price (for custom_api pricing source).
+price_source_custom_api: null
+
+# An interval time in second to update the price from custom api (for custom_api pricing source).
+custom_api_update_interval: null
+
+# enable moving price floor and ceiling.
+moving_price_band_enabled: null
+
+# Price band ceiling pct.
+price_ceiling_pct: null
+
+# Price band floor pct.
+price_floor_pct: null
+
+# price_band_refresh_time.
+price_band_refresh_time: null
