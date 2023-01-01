@@ -66,7 +66,7 @@ class EWMVIndicator(BaseTrailingIndicator):
 
     def _indicator_calculation(self) -> float:
         return pd.Series(self._sampling_buffer.get_as_numpy_array()).ewm(
-            span=self._sampling_length, adjust=True).var().iloc[-1]
+            span=self._samples_length, adjust=True).var().iloc[-1]
 
     def _processing_calculation(self) -> float:
         # The EWMA formula does not assume a long-run average variance level.
@@ -92,7 +92,7 @@ class EWMAIndicator(BaseTrailingIndicator):
 
     def _indicator_calculation(self) -> float:
         return pd.Series(self._sampling_buffer.get_as_numpy_array()).ewm(
-            span=self._sampling_length, adjust=True).mean().iloc[-1]
+            span=self._samples_length, adjust=True).mean().iloc[-1]
 
     def _processing_calculation(self) -> float:
         # The EWMA formula does not assume a long-run average variance level.
@@ -118,7 +118,7 @@ class EWMVolatilityIndicator(BaseTrailingIndicator):
 
     def _indicator_calculation(self) -> float:
         return pd.Series(self._sampling_buffer.get_as_numpy_array()).ewm(
-            span=self._sampling_length, adjust=True).std().iloc[-1]
+            span=self._samples_length, adjust=True).std().iloc[-1]
 
     def _processing_calculation(self) -> float:
         # The EWMA formula does not assume a long-run average variance level.

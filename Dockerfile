@@ -68,6 +68,10 @@ WORKDIR /home/hummingbot
 COPY --from=builder /opt/conda/ /opt/conda/
 COPY --from=builder /home/ /home/
 
+ENV CERTS_FOLDER=/home/hummingbot/.hummingbot-gateway/certs
+ENV GATEWAY_CONF_FOLDER=/home/hummingbot/.hummingbot-gateway/conf
+ENV GATEWAY_LOGS_FOLDER=/logs
+
 # Setting bash as default shell because we have .bashrc with customized PATH (setting SHELL affects RUN, CMD and ENTRYPOINT, but not manual commands e.g. `docker run image COMMAND`!)
 SHELL [ "/bin/bash", "-lc" ]
 
