@@ -18,8 +18,6 @@ def start(self):
     base_market = el_market if el_market.split('-')[0] == token else None
     market = quote_market if quote_market else base_market
     order_amount = c_map.get("order_amount").value
-    buy_spread = c_map.get("buy_spread").value
-    sell_spread = c_map.get("sell_spread").value
     inventory_skew_enabled = c_map.get("inventory_skew_enabled").value
     inventory_target_base_pct = 0 if c_map.get("inventory_target_base_pct").value is None else \
         c_map.get("inventory_target_base_pct").value
@@ -32,18 +30,12 @@ def start(self):
     volatility_to_spread_multiplier = c_map.get("volatility_to_spread_multiplier").value
     max_spread = c_map.get("max_spread").value
     max_order_age = c_map.get("max_order_age").value
-    order_book_depth = c_map.get("order_book_depth").value
-    order_book_log_interval = c_map.get("order_book_log_interval").value
-    order_book_buy_position = c_map.get("order_book_buy_position").value
-    order_book_sell_position = c_map.get("order_book_sell_position").value
-    order_book_buy_volume_in_front = c_map.get("order_book_buy_volume_in_front").value
-    order_book_sell_volume_in_front = c_map.get("order_book_sell_volume_in_front").value
-    ping_pong_enabled = c_map.get("ping_pong_enabled").value
-    ping_pong_initial_buy = c_map.get("ping_pong_initial_buy").value
-    restart_every_seconds = c_map.get("restart_every_seconds").value
+    bid_position = c_map.get("bid_position").value
+    ask_position = c_map.get("ask_position").value
+    buy_volume_in_front = c_map.get("buy_volume_in_front").value
+    sell_volume_in_front = c_map.get("sell_volume_in_front").value
     volatility_algorithm = c_map.get("volatility_algorithm").value
     ignore_over_spread = c_map.get("ignore_over_spread").value
-    min_order_usdt = c_map.get("min_order_usdt").value
     filled_order_delay = c_map.get("filled_order_delay").value
     bits_behind = c_map.get("bits_behind").value
 
@@ -86,8 +78,6 @@ def start(self):
         market_info=market_info,
         token=token,
         order_amount=order_amount,
-        buy_spread=buy_spread,
-        sell_spread=sell_spread,
         inventory_skew_enabled=inventory_skew_enabled,
         inventory_target_base_pct=inventory_target_base_pct,
         order_refresh_time=order_refresh_time,
@@ -100,17 +90,11 @@ def start(self):
         volatility_algorithm=volatility_algorithm,
         max_spread=max_spread,
         max_order_age=max_order_age,
-        order_book_depth=order_book_depth,
-        order_book_log_interval=order_book_log_interval,
-        order_book_buy_position=order_book_buy_position,
-        order_book_sell_position=order_book_sell_position,
-        order_book_buy_volume_in_front=order_book_buy_volume_in_front,
-        order_book_sell_volume_in_front=order_book_sell_volume_in_front,
-        ping_pong_enabled=ping_pong_enabled,
-        ping_pong_initial_buy=ping_pong_initial_buy,
-        restart_every_seconds=restart_every_seconds,
+        bid_position=bid_position,
+        ask_position=ask_position,
+        buy_volume_in_front=buy_volume_in_front,
+        sell_volume_in_front=sell_volume_in_front,
         ignore_over_spread=ignore_over_spread,
-        min_order_usdt=min_order_usdt,
         filled_order_delay=filled_order_delay,
         bits_behind=bits_behind,
         asset_price_delegate=asset_price_delegate,

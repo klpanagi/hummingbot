@@ -163,26 +163,6 @@ smartliq_config_map = {
             validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=False),
             prompt_on_new=True
         ),
-    "buy_spread":
-        ConfigVar(
-            key="buy_spread",
-            prompt="How far away from the mid price do you want to place bid orders? "
-                "(Enter 1 to indicate 1%) --> ",
-            type_str="decimal",
-            default=Decimal("0.01"),
-            validator=lambda v: validate_decimal(v, 0, 100, inclusive=False),
-            prompt_on_new=False
-        ),
-    "sell_spread":
-        ConfigVar(
-            key="sell_spread",
-            prompt="How far away from the mid price do you want to place ask orders? "
-                   "(Enter 1 to indicate 1%) --> ",
-            type_str="decimal",
-            default=Decimal("0.01"),
-            validator=lambda v: validate_decimal(v, 0, 100, inclusive=False),
-            prompt_on_new=False
-        ),
     "inventory_skew_enabled":
         ConfigVar(
             key="inventory_skew_enabled",
@@ -198,6 +178,7 @@ smartliq_config_map = {
             prompt="For each pair, what is your target base asset "
                    "percentage? (Enter 20 to indicate 20%) --> ",
             type_str="decimal",
+            default=Decimal("1"),
             validator=lambda v: validate_decimal(v, 0, 100, inclusive=True),
             prompt_on_new=False
         ),
@@ -209,7 +190,7 @@ smartliq_config_map = {
             type_str="float",
             default=1,
             validator=lambda v: validate_decimal(v, 0, inclusive=False),
-            prompt_on_new=False
+            prompt_on_new=True
         ),
     "order_refresh_tolerance_pct":
         ConfigVar(
@@ -217,8 +198,8 @@ smartliq_config_map = {
             prompt="Enter the percent change in price needed to refresh orders at each cycle "
                 "(Enter 1 to indicate 1%) --> ",
             type_str="decimal",
-            default=Decimal("0.1"),
-            validator=lambda v: validate_decimal(v, -10, 10, inclusive=True),
+            default=Decimal("0"),
+            validator=lambda v: validate_decimal(v, 0, 100, inclusive=True),
             prompt_on_new=False
         ),
     "inventory_range_multiplier":
@@ -228,7 +209,8 @@ smartliq_config_map = {
                 "expressed in multiples of your total order size? ",
             type_str="decimal",
             validator=lambda v: validate_decimal(v, min_value=0, inclusive=False),
-            default=Decimal("1")
+            default=Decimal("1"),
+            prompt_on_new=False
         ),
     "volatility_price_samples":
         ConfigVar(
@@ -237,7 +219,8 @@ smartliq_config_map = {
                 "market volatility on each cycle? --> ",
             type_str="int",
             validator=lambda v: validate_int(v, min_value=1, inclusive=False),
-            default=10
+            default=2,
+            prompt_on_new=False
         ),
     "volatility_interval":
         ConfigVar(
@@ -246,7 +229,8 @@ smartliq_config_map = {
                 " data from to calculate market volatility --> ",
             type_str="int",
             validator=lambda v: validate_int(v, min_value=0, inclusive=False),
-            default=1
+            default=1,
+            prompt_on_new=False
         ),
     "avg_volatility_samples":
         ConfigVar(
@@ -255,7 +239,8 @@ smartliq_config_map = {
                 " to calculate average market volatility? --> ",
             type_str="int",
             validator=lambda v: validate_int(v, min_value=0, inclusive=False),
-            default=1
+            default=1,
+            prompt_on_new=False
         ),
     "volatility_to_spread_multiplier":
         ConfigVar(
@@ -293,68 +278,41 @@ smartliq_config_map = {
                    "(in seconds)? --> ",
             type_str="float",
             validator=lambda v: validate_decimal(v, min_value=0, inclusive=False),
-            default=60. * 10.
+            default=1800
         ),
-    "order_book_depth":
-        ConfigVar(key="order_book_depth",
-                  prompt="Depth of the Order Book to use --> ",
-                  type_str="int",
-                  validator=lambda v: validate_int(v, min_value=1, inclusive=False),
-                  default=20),
-    "order_book_log_interval":
-        ConfigVar(key="order_book_log_interval",
-                  prompt="Interval in seconds to log order book --> ",
-                  type_str="int",
-                  validator=lambda v: validate_int(v, min_value=1, inclusive=False),
-                  default=10),
-    "order_book_buy_position":
-        ConfigVar(key="order_book_buy_position",
-                  prompt="Buy (bid) position on the order book to place orders (Default=0) --> ",
-                  type_str="int",
-                  validator=lambda v: validate_int(v, inclusive=False),
-                  default=3),
-    "order_book_sell_position":
-        ConfigVar(key="order_book_sell_position",
-                  prompt="Sell (ask) position on the order book to place orders (Default=0) --> ",
-                  type_str="int",
-                  validator=lambda v: validate_int(v, inclusive=False),
-                  default=2),
-    "order_book_buy_volume_in_front":
-        ConfigVar(key="order_book_buy_volume_in_front",
-                  prompt="Buy (bid) volume in the order book in front of order (Default=-1) --> ",
-                  type_str="decimal",
-                  validator=lambda v: validate_decimal(v, inclusive=False),
-                  default=Decimal("-1")),
-    "order_book_sell_volume_in_front":
-        ConfigVar(key="order_book_sell_volume_in_front",
-                  prompt="Sell (ask) volume in the order book in front of order (Default=-1) --> ",
-                  type_str="decimal",
-                  validator=lambda v: validate_decimal(v, inclusive=False),
-                  default=Decimal("-1")),
-    "ping_pong_enabled":
+    "bid_position":
         ConfigVar(
-            key="ping_pong_enabled",
-            prompt="Enable/Disable ping-pong feature --> ",
-            type_str="bool",
-            default=False,
-            validator=validate_bool
-        ),
-    "ping_pong_initial_buy":
-        ConfigVar(
-            key="ping_pong_initial_buy",
-            prompt="Set ping-pong initial position to BUY/SELL --> ",
-            type_str="bool",
-            default=True,
-            validator=validate_bool
-        ),
-    "restart_every_seconds":
-        ConfigVar(
-            key="restart_every_seconds",
-            prompt="Auto-Restart the strategy after some time "
-                   "(in seconds)? --> ",
+            key="bid_position",
+            prompt="Target Bid position on the order book (Default=3) --> ",
             type_str="int",
             validator=lambda v: validate_int(v, inclusive=False),
-            default=60 * 60
+            default=3,
+            prompt_on_new=True
+        ),
+    "ask_position":
+        ConfigVar(
+            key="ask_position",
+            prompt="Target Ask position on the order book(Default=3) --> ",
+            type_str="int",
+            validator=lambda v: validate_int(v, inclusive=False),
+            default=3,
+            prompt_on_new=True
+        ),
+    "buy_volume_in_front":
+        ConfigVar(
+            key="buy_volume_in_front",
+            prompt="Buy (bid) volume in the order book in front of order (Default=-1) --> ",
+            type_str="decimal",
+            validator=lambda v: validate_decimal(v, inclusive=False),
+            default=Decimal("-1")
+        ),
+    "sell_volume_in_front":
+        ConfigVar(
+            key="sell_volume_in_front",
+            prompt="Sell (ask) volume in the order book in front of order (Default=-1) --> ",
+            type_str="decimal",
+            validator=lambda v: validate_decimal(v, inclusive=False),
+            default=Decimal("-1")
         ),
     "ignore_over_spread":
         ConfigVar(
@@ -364,14 +322,6 @@ smartliq_config_map = {
             type_str="decimal",
             default=Decimal("1"),
             validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=False),
-        ),
-    "min_order_usdt":
-        ConfigVar(
-            key="min_order_usdt",
-            prompt="Minimum order amount in USDT --> ",
-            type_str="decimal",
-            default=Decimal("10"),
-            validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
         ),
     "filled_order_delay":
         ConfigVar(
@@ -390,71 +340,91 @@ smartliq_config_map = {
             default=1
         ),
     "price_source":
-        ConfigVar(key="price_source",
-                  prompt="Which price source to use? (current_market/external_market/custom_api) --> ",
-                  type_str="str",
-                  default="current_market",
-                  validator=validate_price_source,
-                  on_validated=on_validate_price_source),
+        ConfigVar(
+            key="price_source",
+            prompt="Which price source to use? (current_market/external_market/custom_api) --> ",
+            type_str="str",
+            default="current_market",
+            validator=validate_price_source,
+            on_validated=on_validate_price_source
+        ),
     "price_type":
-        ConfigVar(key="price_type",
-                  prompt="Which price type to use? ("
-                         "mid_price/last_price/last_own_trade_price/best_bid/best_ask/inventory_cost) --> ",
-                  type_str="str",
-                  required_if=lambda: smartliq_config_map.get("price_source").value != "custom_api",
-                  default="mid_price",
-                  on_validated=on_validated_price_type,
-                  validator=validate_price_type),
+        ConfigVar(
+            key="price_type",
+            prompt="Which price type to use? ("
+                   "mid_price/last_price/last_own_trade_price/best_bid/best_ask/inventory_cost) --> ",
+            type_str="str",
+            required_if=lambda: smartliq_config_map.get("price_source").value != "custom_api",
+            default="mid_price",
+            on_validated=on_validated_price_type,
+            validator=validate_price_type
+        ),
     "price_source_exchange":
-        ConfigVar(key="price_source_exchange",
-                  prompt="Enter external price source exchange name --> ",
-                  required_if=lambda: smartliq_config_map.get("price_source").value == "external_market",
-                  type_str="str",
-                  validator=validate_price_source_exchange,
-                  on_validated=on_validated_price_source_exchange),
+        ConfigVar(
+            key="price_source_exchange",
+            prompt="Enter external price source exchange name --> ",
+            required_if=lambda: smartliq_config_map.get("price_source").value == "external_market",
+            type_str="str",
+            validator=validate_price_source_exchange,
+            on_validated=on_validated_price_source_exchange
+        ),
     "price_source_market":
-        ConfigVar(key="price_source_market",
-                  prompt=price_source_market_prompt,
-                  required_if=lambda: smartliq_config_map.get("price_source").value == "external_market",
-                  type_str="str",
-                  validator=validate_price_source_market),
+        ConfigVar(
+            key="price_source_market",
+            prompt=price_source_market_prompt,
+            required_if=lambda: smartliq_config_map.get("price_source").value == "external_market",
+            type_str="str",
+            validator=validate_price_source_market
+        ),
     "price_source_custom_api":
-        ConfigVar(key="price_source_custom_api",
-                  prompt="Enter pricing API URL --> ",
-                  required_if=lambda: smartliq_config_map.get("price_source").value == "custom_api",
-                  type_str="str"),
+        ConfigVar(
+            key="price_source_custom_api",
+            prompt="Enter pricing API URL --> ",
+            required_if=lambda: smartliq_config_map.get("price_source").value == "custom_api",
+            type_str="str"
+        ),
     "custom_api_update_interval":
-        ConfigVar(key="custom_api_update_interval",
-                  prompt="Enter custom API update interval in second (default: 5.0, min: 0.5) --> ",
-                  required_if=lambda: False,
-                  default=float(5),
-                  type_str="float",
-                  validator=lambda v: validate_decimal(v, Decimal("0.5"))),
+        ConfigVar(
+            key="custom_api_update_interval",
+            prompt="Enter custom API update interval in second (default: 5.0, min: 0.5) --> ",
+            required_if=lambda: False,
+            default=float(5),
+            type_str="float",
+            validator=lambda v: validate_decimal(v, Decimal("0.5"))
+        ),
     "moving_price_band_enabled":
-        ConfigVar(key="moving_price_band_enabled",
-                  prompt="Would you like to enable moving price floor and ceiling? (Yes/No) --> ",
-                  type_str="bool",
-                  default=False,
-                  validator=validate_bool),
+        ConfigVar(
+            key="moving_price_band_enabled",
+            prompt="Would you like to enable moving price floor and ceiling? (Yes/No) --> ",
+            type_str="bool",
+            default=False,
+            validator=validate_bool
+        ),
     "price_ceiling_pct":
-        ConfigVar(key="price_ceiling_pct",
-                  prompt="Enter a percentage to the current price that sets the price ceiling. Above this price, only sell orders will be placed --> ",
-                  type_str="decimal",
-                  default=Decimal("1"),
-                  required_if=lambda: smartliq_config_map.get("moving_price_band_enabled").value,
-                  validator=validate_decimal),
+        ConfigVar(
+            key="price_ceiling_pct",
+            prompt="Enter a percentage to the current price that sets the price ceiling. Above this price, only sell orders will be placed --> ",
+            type_str="decimal",
+            default=Decimal("1"),
+            required_if=lambda: smartliq_config_map.get("moving_price_band_enabled").value,
+            validator=validate_decimal
+        ),
     "price_floor_pct":
-        ConfigVar(key="price_floor_pct",
-                  prompt="Enter a percentage to the current price that sets the price floor. Below this price, only buy orders will be placed --> ",
-                  type_str="decimal",
-                  default=Decimal("-1"),
-                  required_if=lambda: smartliq_config_map.get("moving_price_band_enabled").value,
-                  validator=validate_decimal),
+        ConfigVar(
+            key="price_floor_pct",
+            prompt="Enter a percentage to the current price that sets the price floor. Below this price, only buy orders will be placed --> ",
+            type_str="decimal",
+            default=Decimal("-1"),
+            required_if=lambda: smartliq_config_map.get("moving_price_band_enabled").value,
+            validator=validate_decimal
+        ),
     "price_band_refresh_time":
-        ConfigVar(key="price_band_refresh_time",
-                  prompt="After this amount of time (in seconds), the price bands are reset based on the current price --> ",
-                  type_str="float",
-                  default=86400,
-                  required_if=lambda: smartliq_config_map.get("moving_price_band_enabled").value,
-                  validator=validate_decimal),
+        ConfigVar(
+            key="price_band_refresh_time",
+            prompt="After this amount of time (in seconds), the price bands are reset based on the current price --> ",
+            type_str="float",
+            default=86400,
+            required_if=lambda: smartliq_config_map.get("moving_price_band_enabled").value,
+            validator=validate_decimal
+        ),
 }

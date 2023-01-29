@@ -18,12 +18,6 @@ token: null
 # The size of each order in specified token amount
 order_amount: null
 
-# The spread from mid price to place ask orders, enter 1 to indicate 1%
-buy_spread: null
-
-# The spread from mid price to place bid orders, enter 1 to indicate 1%
-sell_spread: null
-
 # Whether to enable Inventory skew feature (true/false).
 inventory_skew_enabled: null
 
@@ -62,27 +56,13 @@ max_spread: null
 # The maximum life time of your orders in seconds
 max_order_age: null
 
-# For more detailed information, see:
-# TODO!
+bid_position: null
+ask_position: null
 
-order_book_depth: null
-
-order_book_log_interval: null
-
-order_book_buy_position: null
-order_book_sell_position: null
-
-order_book_buy_volume_in_front: -1
-order_book_sell_volume_in_front: -1
-
-ping_pong_enabled: null
-ping_pong_initial_buy: null
-
-restart_every_seconds: null
+buy_volume_in_front: -1
+sell_volume_in_front: -1
 
 ignore_over_spread: null
-
-min_order_usdt: null
 
 filled_order_delay: null
 

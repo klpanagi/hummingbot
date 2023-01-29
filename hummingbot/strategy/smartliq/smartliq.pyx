@@ -86,33 +86,25 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                     market_info: MarketTradingPairTuple,
                     token: str,
                     order_amount: Decimal,
-                    buy_spread: Decimal = Decimal("0.1"),
-                    sell_spread: Decimal = Decimal("0.1"),
                     inventory_skew_enabled: bool = False,
                     inventory_target_base_pct: Decimal = s_decimal_zero,
                     order_refresh_time: float = 2.0,
                     order_refresh_tolerance_pct: Decimal = s_decimal_neg_one,
                     inventory_range_multiplier: Decimal = Decimal("1"),
-                    volatility_price_samples: int = 30,
+                    volatility_price_samples: int = 2,
                     volatility_interval: double = 1.0,
-                    avg_volatility_samples: int = 2,
+                    avg_volatility_samples: int = 1,
                     volatility_to_spread_multiplier: Decimal = Decimal("10"),
-                    volatility_algorithm: str = "ewm-vol",
+                    volatility_algorithm: str = "ivol",
                     max_spread: Decimal = s_decimal_neg_one,
                     max_order_age: float = 60. * 60.,
                     status_report_interval: float = 900,
-                    order_book_depth: int = 20,
-                    order_book_log_interval: int = 10,
-                    order_book_buy_position: int = 3,
-                    order_book_sell_position: int = 3,
-                    order_book_buy_volume_in_front: Decimal = Decimal("-1"),
-                    order_book_sell_volume_in_front: Decimal = Decimal("-1"),
-                    ping_pong_enabled: bool = False,
-                    ping_pong_initial_buy: bool = True,
-                    restart_every_seconds: int = 3600,
+                    bid_position: int = 3,
+                    ask_position: int = 3,
+                    buy_volume_in_front: Decimal = Decimal("-1"),
+                    sell_volume_in_front: Decimal = Decimal("-1"),
                     ignore_over_spread: Decimal = Decimal("1.0"),
-                    min_order_usdt: Decimal = Decimal("10.0"),
-                    filled_order_delay: float = 10.0,
+                    filled_order_delay: float = 60.0,
                     should_wait_order_cancel_confirmation: bool = True,
                     bits_behind: int = 1,
                     price_type: str = "mid_price",
@@ -129,8 +121,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self._inventory_skew_enabled = inventory_skew_enabled
         self._inventory_range_multiplier = inventory_range_multiplier
 
-        self._buy_spread = buy_spread / Decimal('100')
-        self._sell_spread = sell_spread / Decimal('100')
         self._order_refresh_tolerance_pct = order_refresh_tolerance_pct / Decimal('100')
         self._inventory_target_base_pct = inventory_target_base_pct / Decimal('100')
         self._max_spread = max_spread / Decimal('100')
@@ -145,17 +135,11 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self._max_order_age = max_order_age
         self._status_report_interval = status_report_interval
         self._hb_app_notification = hb_app_notification
-        self._ping_pong_enabled = ping_pong_enabled
-        self._ping_pong_initial_buy = ping_pong_initial_buy
 
-        self._order_book_depth = order_book_depth
-        self._order_book_log_interval = order_book_log_interval
-        self._order_book_buy_position = order_book_buy_position
-        self._order_book_sell_position = order_book_sell_position
-        self._order_book_buy_volume_in_front = order_book_buy_volume_in_front
-        self._order_book_sell_volume_in_front = order_book_sell_volume_in_front
-        self._restart_every_seconds = restart_every_seconds
-        self._min_order_usdt = min_order_usdt
+        self._buy_position = bid_position
+        self._sell_position = ask_position
+        self._buy_volume_in_front = buy_volume_in_front
+        self._sell_volume_in_front = sell_volume_in_front
         self._filled_order_delay = filled_order_delay
         self._should_wait_order_cancel_confirmation = should_wait_order_cancel_confirmation
         self._bits_behind = bits_behind
@@ -166,13 +150,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self._inventory_cost_price_delegate = inventory_cost_price_delegate
         self._price_type = self.get_price_type(price_type)
 
-        # Set this to start ping-pong with initial SELL order
-        self._filled_buy_orders_count = 0 if self._ping_pong_initial_buy \
-            else 1
-
         self._filled_sell_orders_count = 0
-        self._order_book = pd.DataFrame()
-        self._last_book_reported = 0.
         self._ready_to_trade = False
         self._token_balances = {}
         self._last_vol_reported = 0.
@@ -180,8 +158,8 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self._last_pnl_update = 0.
         self._last_vol = s_decimal_zero
         self._start_time = 0
-        self._calculated_order_book_buy_position = 0
-        self._calculated_order_book_sell_position = 0
+        self._calculated_buy_position = 0
+        self._calculated_sell_position = 0
         self._last_own_trade_price = Decimal('nan')
 
         self._cancel_timestamp = 0
@@ -237,7 +215,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def order_book(self) -> pd.DataFrame:
-        return self._order_book
+        return self.exchange.order_books[self.trading_pair]
 
     @property
     def market_info(self) -> MarketTradingPairTuple:
@@ -245,16 +223,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def active_orders(self) -> List[LimitOrder]:
-        """active_orders.
-
-        List active orders
-        (they have been sent to the market and have not been cancelled yet).
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._sb_order_tracker.active_limit_orders
 
     @property
@@ -267,21 +235,11 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def quote_token(self) -> str:
-        """
-        Get the quote token (right-hand side) from all markets in this strategy
-        """
         return self.trading_pair.split("-")[1]
 
     @property
     def base_token(self) -> str:
-        """
-        Get the base token (left-hand side) from all markets in this strategy
-        """
         return self.trading_pair.split("-")[0]
-
-    @property
-    def ping_pong_enabled(self) -> bool:
-        return self._ping_pong_enabled
 
     @property
     def moving_price_band(self) -> MovingPriceBand:
@@ -295,62 +253,11 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     # --------------- Dynamic Reconfigure Properties -------------------
     @property
-    def buy_spread(self) -> Decimal:
-        """buy_spread.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
-        return self._buy_spread
-
-    @buy_spread.setter
-    def buy_spread(self, value: Decimal) -> None:
-        self.logger().info(
-            f'Updating <buy_spread> parameter: '
-            f'{self._buy_spread * Decimal(100)} -> {value}'
-        )
-        self._buy_spread = value / Decimal('100')
-
-    @property
-    def sell_spread(self) -> Decimal:
-        return self._sell_spread
-
-    @sell_spread.setter
-    def sell_spread(self, value: Decimal) -> None:
-        """sell_spread.
-
-        Args:
-            value (Decimal): value
-
-        Returns:
-            None:
-        """
-        self.logger().info(
-            f'Updating <sell_spread> parameter: '
-            f'{self._sell_spread * Decimal(100)} -> {value}'
-        )
-        self._sell_spread = value / Decimal('100')
-
-    @property
     def order_amount(self) -> Decimal:
-        """order_amount.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._order_amount
 
     @order_amount.setter
     def order_amount(self, value: Decimal):
-        """order_amount.
-
-        Args:
-            value (Decimal): value
-        """
         self.logger().info(
             f'Updating <order_amount> parameter: '
             f'{self._order_amount} -> {value}'
@@ -359,22 +266,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def inventory_skew_enabled(self) -> bool:
-        """inventory_skew_enabled.
-
-        Args:
-
-        Returns:
-            bool:
-        """
         return self._inventory_skew_enabled
 
     @inventory_skew_enabled.setter
     def inventory_skew_enabled(self, value: bool):
-        """inventory_skew_enabled.
-
-        Args:
-            value (bool): value
-        """
         self.logger().info(
             f'Updating <inventory_skew_enabled> parameter: '
             f'{self._inventory_skew_enabled} -> {value}'
@@ -383,22 +278,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def inventory_target_base_pct(self) -> Decimal:
-        """inventory_target_base_pct.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._inventory_target_base_pct
 
     @inventory_target_base_pct.setter
     def inventory_target_base_pct(self, value: Decimal):
-        """inventory_target_base_pct.
-
-        Args:
-            value (Decimal): value
-        """
         self.logger().info(
             f'Updating <inventory_target_base_pct> parameter: '
             f'{self._inventory_target_base_pct * Decimal(100)} -> {value}'
@@ -407,22 +290,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def order_refresh_time(self) -> float:
-        """order_refresh_time.
-
-        Args:
-
-        Returns:
-            float:
-        """
         return self._order_refresh_time
 
     @order_refresh_time.setter
     def order_refresh_time(self, value: float):
-        """order_refresh_time.
-
-        Args:
-            value (float): value
-        """
         self.logger().info(
             f'Updating <order_refresh_time> parameter: '
             f'{self._order_refresh_time} -> {value}'
@@ -431,22 +302,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def order_refresh_tolerance_pct(self) -> Decimal:
-        """order_refresh_tolerance_pct.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._order_refresh_tolerance_pct
 
     @order_refresh_tolerance_pct.setter
     def order_refresh_tolerance_pct(self, value: Decimal):
-        """order_refresh_tolerance_pct.
-
-        Args:
-            value (Decimal): value
-        """
         self.logger().info(
             f'Updating <order_refresh_tolerance_pct> parameter: '
             f'{self._order_refresh_tolerance_pct * Decimal(100)} -> {value}'
@@ -455,22 +314,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def max_spread(self) -> Decimal:
-        """max_spread.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._max_spread
 
     @max_spread.setter
     def max_spread(self, value: Decimal):
-        """max_spread.
-
-        Args:
-            value (Decimal): value
-        """
         self.logger().info(
             f'Updating <max_spread> parameter: '
             f'{self._max_spread * Decimal(100)} -> {value}'
@@ -479,22 +326,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def max_order_age(self) -> float:
-        """max_order_age.
-
-        Args:
-
-        Returns:
-            float:
-        """
         return self._max_order_age
 
     @max_order_age.setter
     def max_order_age(self, value: float):
-        """max_order_age.
-
-        Args:
-            value (float): value
-        """
         self.logger().info(
             f'Updating <max_order_age> parameter: '
             f'{self._max_order_age} -> {value}'
@@ -503,22 +338,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def volatility_price_samples(self) -> int:
-        """volatility_price_samples.
-
-        Args:
-
-        Returns:
-            int:
-        """
         return self._volatility_price_samples
 
     @volatility_price_samples.setter
     def volatility_price_samples(self, value: int):
-        """volatility_price_samples.
-
-        Args:
-            value (int): value
-        """
         self.logger().info(
             f'Updating <volatility_price_samples> parameter: '
             f'{self._volatility_price_samples} -> {value}'
@@ -527,22 +350,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def volatility_interval(self) -> double:
-        """volatility_interval.
-
-        Args:
-
-        Returns:
-            double:
-        """
         return self._volatility_interval
 
     @volatility_interval.setter
     def volatility_interval(self, value):
-        """volatility_interval.
-
-        Args:
-            value:
-        """
         self.logger().info(
             f'Updating <volatility_interval> parameter: '
             f'{self._volatility_interval} -> {value}'
@@ -551,22 +362,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def avg_volatility_samples(self) -> int:
-        """avg_volatility_samples.
-
-        Args:
-
-        Returns:
-            int:
-        """
         return self._avg_volatility_samples
 
     @avg_volatility_samples.setter
     def avg_volatility_samples(self, value: int):
-        """avg_volatility_samples.
-
-        Args:
-            value (int): value
-        """
         self.logger().info(
             f'Updating <avg_volatility_samples> parameter: '
             f'{self._avg_volatility_samples} -> {value}'
@@ -575,22 +374,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def volatility_to_spread_multiplier(self) -> Decimal:
-        """volatility_to_spread_multiplier.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._volatility_to_spread_multiplier
 
     @volatility_to_spread_multiplier.setter
     def volatility_to_spread_multiplier(self, value):
-        """volatility_to_spread_multiplier.
-
-        Args:
-            value:
-        """
         self.logger().info(
             f'Updating <volatility_to_spread_multiplier> parameter: '
             f'{self._volatility_to_spread_multiplier} -> {value}'
@@ -599,22 +386,10 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     @property
     def volatility_algorithm(self) -> str:
-        """volatility_algorithm.
-
-        Args:
-
-        Returns:
-            str:
-        """
         return self._volatility_algorithm
 
     @volatility_algorithm.setter
     def volatility_algorithm(self, value: str):
-        """volatility_algorithm.
-
-        Args:
-            value (str): value
-        """
         self.logger().info(
             f'Updating <volatility_algorithm> parameter: '
             f'{self._volatility_algorithm} -> {value}'
@@ -642,162 +417,64 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self._volatility_algorithm = value
 
     @property
-    def order_book_buy_position(self) -> int:
-        """order_book_buy_position.
+    def buy_position(self) -> int:
+        return self._buy_position
 
-        Args:
-
-        Returns:
-            int:
-        """
-        return self._order_book_buy_position
-
-    @order_book_buy_position.setter
-    def order_book_buy_position(self, value: int):
-        """order_book_buy_position.
-
-        Args:
-            value (int): value
-        """
+    @buy_position.setter
+    def buy_position(self, value: int):
         self.logger().info(
-            f'Updating <order_book_buy_position> parameter: '
-            f'{self._order_book_buy_position} -> {value}'
+            f'Updating <buy_position> parameter: '
+            f'{self._buy_position} -> {value}'
         )
-        self._order_book_buy_position = value
+        self._buy_position = value
 
     @property
-    def order_book_sell_position(self) -> int:
-        """order_book_sell_position.
+    def sell_position(self) -> int:
+        return self._sell_position
 
-        Args:
-
-        Returns:
-            int:
-        """
-        return self._order_book_sell_position
-
-    @order_book_sell_position.setter
-    def order_book_sell_position(self, value: int):
-        """order_book_sell_position.
-
-        Args:
-            value (int): value
-        """
+    @sell_position.setter
+    def sell_position(self, value: int):
         self.logger().info(
-            f'Updating <order_book_sell_position> parameter: '
-            f'{self._order_book_sell_position} -> {value}'
+            f'Updating <sell_position> parameter: '
+            f'{self._sell_position} -> {value}'
         )
-        self._order_book_sell_position = value
+        self._sell_position = value
 
     @property
-    def order_book_buy_volume_in_front(self) -> int:
-        """order_book_buy_volume_in_front.
+    def buy_volume_in_front(self) -> int:
+        return self._buy_volume_in_front
 
-        Args:
-
-        Returns:
-            int:
-        """
-        return self._order_book_buy_volume_in_front
-
-    @order_book_buy_volume_in_front.setter
-    def order_book_buy_volume_in_front(self, value: int):
-        """order_book_buy_volume_in_front.
-
-        Args:
-            value (int): value
-        """
+    @buy_volume_in_front.setter
+    def buy_volume_in_front(self, value: int):
         self.logger().info(
-            f'Updating <order_book_buy_volume_in_front> parameter: '
-            f'{self._order_book_buy_volume_in_front} -> {value}'
+            f'Updating <buy_volume_in_front> parameter: '
+            f'{self._buy_volume_in_front} -> {value}'
         )
-        self._order_book_buy_volume_in_front = value
+        self._buy_volume_in_front = value
 
     @property
-    def order_book_sell_volume_in_front(self) -> int:
-        """order_book_sell_volume_in_front.
+    def sell_volume_in_front(self) -> int:
+        return self._sell_volume_in_front
 
-        Args:
-
-        Returns:
-            int:
-        """
-        return self._order_book_sell_volume_in_front
-
-    @order_book_sell_volume_in_front.setter
-    def order_book_sell_volume_in_front(self, value: int):
-        """order_book_sell_volume_in_front.
-
-        Args:
-            value (int): value
-        """
+    @sell_volume_in_front.setter
+    def sell_volume_in_front(self, value: int):
         self.logger().info(
-            f'Updating <order_book_sell_volume_in_front> parameter: '
-            f'{self._order_book_sell_volume_in_front} -> {value}'
+            f'Updating <sell_volume_in_front> parameter: '
+            f'{self._sell_volume_in_front} -> {value}'
         )
-        self._order_book_sell_volume_in_front = value
-
-    @property
-    def restart_every_seconds(self) -> int:
-        return self._restart_every_seconds
-
-    @restart_every_seconds.setter
-    def restart_every_seconds(self, value: int):
-        self.logger().info(
-            f'Updating <restart_every_seconds> parameter: '
-            f'{self._restart_every_seconds} -> {value}'
-        )
-        self._restart_every_seconds = value
+        self._sell_volume_in_front = value
 
     @property
     def ignore_over_spread(self) -> Decimal:
-        """ignore_over_spread.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
         return self._ignore_over_spread
 
     @ignore_over_spread.setter
     def ignore_over_spread(self, value: Decimal):
-        """ignore_over_spread.
-
-        Args:
-            value (Decimal): value
-
-        Returns:
-        """
         self.logger().info(
             f'Updating <ignore_over_spread> parameter: '
             f'{self._ignore_over_spread * Decimal(100)} -> {value}'
         )
         self._ignore_over_spread = value / Decimal('100')
-
-    @property
-    def min_order_usdt(self) -> Decimal:
-        """min_order_usdt.
-
-        Args:
-
-        Returns:
-            Decimal:
-        """
-        return self._min_order_usdt
-
-    @min_order_usdt.setter
-    def min_order_usdt(self, value: Decimal):
-        """min_order_usdt.
-
-        Args:
-            value (Decimal): value
-        """
-        self.logger().info(
-            f'Updating <min_order_usdt> parameter: '
-            f'{self._min_order_usdt} -> {value}'
-        )
-        self._min_order_usdt = value
 
     @property
     def filled_order_delay(self) -> float:
@@ -884,24 +561,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     # ------------ END of Dynamic Reconfigure Parameters ---------------
 
-    def calculate_positions_from_volume_in_front(self):
-        if self._order_book_sell_volume_in_front >= 0:
-            for pos in range(1, len(self._order_book['ask_volume'])):
-                if sum(self._order_book['ask_volume'][0:pos]) > self._order_book_sell_volume_in_front:
-                    self._calculated_order_book_sell_position = pos + 1
-                    break
-            # if requested volume can't be found, go to the end of the order book
-            self._calculated_order_book_sell_position = (
-                self._calculated_order_book_sell_position or len(self._order_book['ask_volume']))
-        if self._order_book_buy_volume_in_front >= 0:
-            for pos in range(1, len(self._order_book['bid_volume'])):
-                if sum(self._order_book['bid_volume'][0:pos]) > self._order_book_buy_volume_in_front:
-                    self._calculated_order_book_buy_position = pos + 1
-                    break
-            # if requested volume can't be found, go to the end of the order book
-            self._calculated_order_book_buy_position = (
-                self._calculated_order_book_buy_position or len(self._order_book['bid_volume']))
-
     async def active_orders_df(self) -> pd.DataFrame:
         """
         Return the active orders in a DataFrame.
@@ -911,6 +570,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             "Side",
             "Price",
             "Spread",
+            "Position",
             "Amount",
             f"Amount({self._token})",
             "Age"
@@ -926,11 +586,16 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             # For real orders, calculate age.
             age_txt = "n/a" if age <= 0. else \
                 pd.Timestamp(age, unit='s').strftime('%H:%M:%S')
+            if order.is_buy:
+                position = self.order_book_index_from_price(order.price, True) + 1
+            else:
+                position = self.order_book_index_from_price(order.price, False) + 1
             data.append([
                 order.trading_pair,
                 "buy" if order.is_buy else "sell",
                 float(order.price),
                 f"{spread:.2%}",
+                position,
                 float(order.quantity),
                 float(size_q),
                 age_txt
@@ -1005,7 +670,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         Return the miner status (payouts, rewards, liquidity, etc.) in a DataFrame
         """
         data = []
-        g_sym = RateOracle.global_token_symbol
+        g_sym = self._hb_app.client_config_map.global_token.global_token_symbol
         columns = [
             "Market",
             "Payout",
@@ -1017,8 +682,9 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         campaigns = await get_campaign_summary(self.exchange.display_name,
                                                [self.trading_pair])
         for market, campaign in campaigns.items():
-            reward = await RateOracle.global_value(campaign.payout_asset,
-                                                   campaign.reward_per_wk)
+            reward = await RateOracle.get_instance().get_value(
+                amount=campaign.reward_per_wk, base_token=campaign.payout_asset
+            )
             data.append([
                 market,
                 campaign.payout_asset,
@@ -1027,8 +693,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                 f"{campaign.apy:.2%}",
                 f"{campaign.spread_max:.2%}%"
             ])
-        df = pd.DataFrame(data=data, columns=columns).replace(np.nan, '',
-                                                              regex=True)
+        df = pd.DataFrame(data=data, columns=columns).replace(np.nan, '', regex=True)
         df.sort_values(by=["Market"], inplace=True)
         return df
 
@@ -1079,13 +744,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         else:
             lines.extend(["", "  No active maker orders."])
 
-        # See if there are any in-flight cancels.
-        # if len(self._sb_order_tracker.in_flight_cancels) > 0:
-        lines.extend(
-            ["", "  In-Flight Cancels:"] +
-            ["    " + ifc for ifc in self._sb_order_tracker.in_flight_cancels]
-        )
-
         warning_lines.extend(self.balance_warning([self.market_info]))
         if len(warning_lines) > 0:
             lines.extend(["", "*** WARNINGS ***"] + warning_lines)
@@ -1100,34 +758,25 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         """
         pass
 
-    def apply_ignore_over_spread(self, proposal: Proposal) -> bool:
-        """apply_ignore_over_spread.
-        If the calculated Order proposal spread is higher than the
-        value of ignore_over_spread parameter, then the proposal is ignored.
-        Works for both BUY and SELL orders.
+    def calculate_positions_from_volume_in_front(self):
+        if self._sell_volume_in_front >= 0:
+            for pos in range(1, len(self._order_book['ask_volume'])):
+                if sum(self._order_book['ask_volume'][0:pos]) > self._sell_volume_in_front:
+                    self._calculated_sell_position = pos + 1
+                    break
+            # if requested volume can't be found, go to the end of the order book
+            self._calculated_sell_position = (
+                self._calculated_sell_position or len(self._order_book['ask_volume']))
+        if self._buy_volume_in_front >= 0:
+            for pos in range(1, len(self._order_book['bid_volume'])):
+                if sum(self._order_book['bid_volume'][0:pos]) > self._buy_volume_in_front:
+                    self._calculated_buy_position = pos + 1
+                    break
+            # if requested volume can't be found, go to the end of the order book
+            self._calculated_buy_position = (
+                self._calculated_buy_position or len(self._order_book['bid_volume']))
 
-        Args:
-            proposal (Proposal): proposal
-        """
-        buy_spread = abs(self.target_to_spread(proposal.buy.price))
-        sell_spread = abs(self.target_to_spread(proposal.sell.price))
-        if buy_spread > self._ignore_over_spread:
-            proposal.buy.size = Decimal(0)
-            self.logger().debug(
-                'Ignoring BUY Proposal due to high spread: '
-                f'ignore_over_spread = {self.ignore_over_spread * Decimal(100)}%'
-            )
-            return True
-        if sell_spread > self._ignore_over_spread:
-            proposal.sell.size = Decimal(0)
-            self.logger().debug(
-                'Ignoring SELL Proposal due to high spread: '
-                f'ignore_over_spread = {self.ignore_over_spread * Decimal(100)}%'
-            )
-            return True
-        return False
-
-    def update_proposal_from_volatility(self, proposal: Proposal) -> None:
+    cdef c_update_proposal_from_volatility(self, proposal: Proposal):
         """update_proposal_from_volatility.
 
         Args:
@@ -1136,14 +785,11 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         Returns:
             None:
         """
-        buy_spread = self.buy_spread
-        sell_spread = self.sell_spread
-        buy_spread_p = abs(self.target_to_spread(proposal.buy.price))
-        if buy_spread_p > buy_spread:
-            buy_spread = buy_spread_p
-        sell_spread_p = abs(self.target_to_spread(proposal.sell.price))
-        if sell_spread_p > sell_spread:
-            sell_spread = sell_spread_p
+        cdef:
+            ExchangeBase market = self._market_info.market
+        ref_price = self.get_price()
+        buy_spread = self.target_to_spread(proposal.buy.price)
+        sell_spread = self.target_to_spread(proposal.sell.price)
 
         if not self.volatility.is_nan():
             # volatility applies only when it is higher than the spread setting.
@@ -1154,22 +800,19 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         if self.max_spread > s_decimal_zero:
             buy_spread = min(buy_spread, self.max_spread)
             sell_spread = min(sell_spread, self.max_spread)
-        price = self.get_price()
         # BUY Order ------------------------------------------------------->
-        buy_price = price * (Decimal("1") - buy_spread)
-        buy_price = self.exchange.quantize_order_price(
+        buy_price = ref_price * (Decimal("1") - buy_spread)
+        buy_price = market.c_quantize_order_price(
             self.trading_pair, buy_price
         )
         # SELL Order ------------------------------------------------------>
-        sell_price = price * (Decimal("1") + sell_spread)
-        sell_price = self.exchange.quantize_order_price(
+        sell_price = ref_price * (Decimal("1") + sell_spread)
+        sell_price = market.c_quantize_order_price(
             self.trading_pair, sell_price
         )
         # ------------------------------------------------------------------
-        if buy_spread_p < buy_spread:
-            proposal.buy.price = buy_price
-        if sell_spread_p < sell_spread:
-            proposal.sell.price = sell_price
+        proposal.buy.price = buy_price
+        proposal.sell.price = sell_price
 
     def cancel_active_orders(self) -> None:
         """cancel_active_orders.
@@ -1382,134 +1025,102 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         Returns:
             Decimal:
         """
-        return (target_price - self.get_price()) / self.get_price()
+        ref_price = self.get_price()
+        return abs((target_price - ref_price) / ref_price)
 
     def _get_order_book(self):
-        order_book = self.exchange.order_books[self.trading_pair]
-        bids = order_book.snapshot[0][['price', 'amount']].head(
-            self._order_book_depth
-        )
-        bids.rename(
-            columns={'price': 'bid_price', 'amount': 'bid_volume'},
-            inplace=True
-        )
-        asks = order_book.snapshot[1][['price', 'amount']].head(
-            self._order_book_depth
-        )
-        asks.rename(
-            columns={'price': 'ask_price', 'amount': 'ask_volume'},
-            inplace=True
-        )
-        joined_df = pd.concat([bids, asks], axis=1)
-        return joined_df
+        return self.exchange.order_books[self.trading_pair]
 
-    def format_order_book(self, book: pd.DataFrame) -> str:
+    def log_positions(self, book: pd.DataFrame) -> None:
         order_idx = self.get_order_book_current_index()  # [0-.]
-        lines = [
-            "    " + line for line in book.to_string(index=True).split("\n")
-        ]
-        if order_idx[0] > -1:
-            lines[order_idx[0] + 1] = f'{lines[order_idx[0] + 1]} [++]'
-        if order_idx[1] > -1:
-            lines[order_idx[1] + 1] = f'{lines[order_idx[1] + 1]} [--]'
+        formatted = self.format_order_book(book)
         orders = self.active_orders
         orders_info = []
         for order in orders:
             if order.is_buy:
                 orders_info.append(
-                    f'Bid (buy) order - price: {order.price:.6}, '
+                    f'Bid (buy) order - '
+                    f'price: {order.price:.6}, '
                     f'size: {order.quantity}, '
-                    f'spread: {abs(self.target_to_spread(order.price)):.6%} '
-                    f'position: {self.order_book_index_from_price(order.price, False) + 1}\n'
+                    f'spread: {self.target_to_spread(order.price):.6%} '
+                    f'position: {self.order_book_index_from_price(order.price, True) + 1}\n'
                 )
             else:
                 orders_info.append(
                     f'Ask (sell) order - price: {order.price:.6}, '
                     f'size: {order.quantity}, '
-                    f'spread: {abs(self.target_to_spread(order.price)):.6%} '
-                    f'position: {self.order_book_index_from_price(order.price, True) + 1}\n'
+                    f'spread: {self.target_to_spread(order.price):.6%} '
+                    f'position: {self.order_book_index_from_price(order.price, False) + 1}\n'
                 )
-        header = f"  Exchance: {self.exchange.name} | " \
-            f"Market: {self.trading_pair} | " \
-            f"Mid Price: {self.get_price():.6} | " + \
-            f"Volatility: {self.volatility:.6}\n" + \
-            "-" * 60 + "\n"
-
-        inflight_cancels = self._sb_order_tracker.in_flight_cancels
-        ifc = f'In Flight Cancels ({len(inflight_cancels)}):\n'
-        ifc += f'----------------------\n'
-        ifc += '\n'.join([ifc for ifc in inflight_cancels])
-
-        text = header + '\n'.join(lines)
-        text += '\n'*2 + f'Active Orders ({len(self.active_orders)}):'
-        text += '\n------------------\n'
-        text += '\n'.join(orders_info)
-        text += '\n' + ifc
-
-        return text
-
-    def log_order_book(self, book: pd.DataFrame) -> None:
-        formatted = self.format_order_book(book)
-        text = 'Order Book\n'
-        text += '============================================================\n'
-        text += formatted + '\n'
-        text += '============================================================\n'
+        header = f"Positions - " \
+                 f"Exchance: {self.exchange.name} | " \
+                 f"Market: {self.trading_pair} | " \
+                 f"Ref Price: {self.get_price():.6} | " \
+                 f"Volatility: {self.volatility:.6}\n" \
+                 "-" * 60 + "\n"
+        text = header + '\n'.join(orders_info)
         self.logger().info(text)
 
     def get_order_book_current_index(self) -> Tuple[int, int]:
-        book = self.order_book
+        book = self.exchange.order_books[self.trading_pair]
         orders = self.active_orders
         buy_index = -1
         sell_index = -1
         for order in orders:
             if order.is_buy:
                 try:
-                    buy_index = book.loc[book['bid_price'] ==
-                                         float(order.price)].index[0]
-                except Exception:
+                    buy_index = book.snapshot[0]['price'].loc[book.snapshot[0]['price'] ==
+                                                              float(order.price)].index[0]
+                except Exception as e:
+                    self.logger().error(e)
                     buy_index = -1
             else:
                 try:
-                    sell_index = book.loc[book['ask_price'] ==
-                                          float(order.price)].index[0]
-                except Exception:
+                    sell_index = book.snapshot[1]['price'].loc[book.snapshot[1]['price'] ==
+                                                               float(order.price)].index[0]
+                except Exception as e:
+                    self.logger().error(e)
                     sell_index = -1
         return (buy_index, sell_index)
 
-    def order_book_price_from_index(self, index: int, ask_order: bool) -> Decimal:
-        if ask_order:
-            return Decimal(self.order_book['ask_price'][index])
+    def order_book_price_from_index(self,
+                                    index: int,
+                                    is_buy: bool
+                                    ) -> Decimal:
+        order_book = self.exchange.order_books[self.trading_pair]
+        if is_buy:
+            bids = order_book.snapshot[0][['price']]
+            return Decimal(bids['price'][index])
+            # return Decimal(self.order_book['bid_price'][index])
         else:
-            return Decimal(self.order_book['bid_price'][index])
+            asks = order_book.snapshot[1][['price']]
+            return Decimal(asks['price'][index])
+            # return Decimal(self.order_book['ask_price'][index])
 
-    def order_book_index_from_price(self, price: Decimal, ask_order: bool) -> int:
-        book = self.order_book
-        if ask_order:
+    def order_book_index_from_price(self, price: Decimal, is_buy: bool) -> int:
+        book = self.exchange.order_books[self.trading_pair]
+        if is_buy:
             try:
-                return book.loc[book['ask_price'] == float(price)].index[0]
+                index = book.snapshot[0]['price'].loc[book.snapshot[0]['price'] == float(price)].index[0]
+                return index
             except Exception:
                 return -1
         else:
             try:
-                return book.loc[book['bid_price'] == float(price)].index[0]
+                index = book.snapshot[1]['price'].loc[book.snapshot[1]['price'] == float(price)].index[0]
+                return index
             except Exception:
                 return -1
 
-    def order_book_spread_by_index(self, index: int, ask_order: bool) -> Decimal:
-        """order_book_spread_by_index.
-
-        Args:
-            index (int): index
-            ask_order (bool): ask_order
-
-        Returns:
-            float:
-        """
+    def order_book_spread_by_index(self, index: int, is_buy: bool) -> Decimal:
         # TODO: Check that index is valid before accessing the DataFrame
-        if ask_order:
-            return (Decimal(self.order_book['ask_price'][index]) - self.get_mid_price()) / self.get_mid_price()
+        order_book = self.exchange.order_books[self.trading_pair]
+        if is_buy:
+            ref_price = Decimal(order_book.snapshot[0]['price'][index])
+            return (ref_price - self.get_mid_price()) / self.get_mid_price()
         else:
-            return (Decimal(self.order_book['bid_price'][index]) - self.get_mid_price()) / self.get_mid_price()
+            ref_price = Decimal(order_book.snapshot[1]['price'][index])
+            return (ref_price - self.get_mid_price()) / self.get_mid_price()
 
     def notify_hb_app(self, msg: str):
         """notify_hb_app.
@@ -1522,14 +1133,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         if self._hb_app_notification:
             super().notify_hb_app(msg)
 
-    cdef c_apply_ping_pong(self, object proposal):
-        if self._filled_buy_orders_count == self._filled_sell_orders_count:
-            self._filled_buy_orders_count = self._filled_sell_orders_count = 0
-        if self._filled_buy_orders_count > 0:
-            proposal.buy.size = Decimal('0')
-        if self._filled_sell_orders_count > 0:
-            proposal.sell.size = Decimal('0')
-
     cdef object c_create_proposal_from_order_book_pos(self):
         cdef:
             ExchangeBase market = self._market_info.market
@@ -1541,41 +1144,33 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             Proposal:
         """
         ob_target_buy_idx = max(
-                self._order_book_buy_position, self._calculated_order_book_buy_position)  # [1,N]
+                self._buy_position,
+                self._calculated_buy_position
+        )  # [1,N]
         ob_target_buy_idx -= 1
         ob_target_sell_idx = max(
-            self._order_book_sell_position, self._calculated_order_book_sell_position)  # [1, N]
+            self._sell_position,
+            self._calculated_sell_position
+        )  # [1, N]
         ob_target_sell_idx -= 1
         # Get the current indexes of buy/sell orders from order-book
         current_ob_idx = self.get_order_book_current_index()  # [0,N]
 
         # Initialize values for Proposal ----------------------------->
-        sell_price = self.get_price()
-        buy_price = self.get_price()
+        ref_price = self.get_price()
+        sell_price = buy_price = ref_price
         # -------------------------------------------------------------
 
         # Buy Orders ------------------------------------------------->
-        if self._order_book_buy_position > 0:
+        if self._buy_position > 0:
             buy_price = self.order_book_price_from_index(
-                ob_target_buy_idx, False
+                ob_target_buy_idx, True
             )
-            if current_ob_idx[0] != ob_target_buy_idx and current_ob_idx[0] >= 0:
-                self.logger().debug(
-                    f'BUY Order Position Slippage: '
-                    f'Target Position = [{ob_target_buy_idx + 1}] '
-                    f'Current Position = [{current_ob_idx[0] + 1}]'
-                )
         # Sell Orders ------------------------------------------------>
-        if self._order_book_sell_position > 0:
+        if self._sell_position > 0:
             sell_price = self.order_book_price_from_index(
-                ob_target_sell_idx, True
+                ob_target_sell_idx, False
             )
-            if current_ob_idx[1] != ob_target_sell_idx and current_ob_idx[1] >= 0:
-                self.logger().debug(
-                    f'SELL Order Position Slippage: '
-                    f'Desired Position = [{ob_target_sell_idx + 1}] '
-                    f'Current Position = [{current_ob_idx[1] + 1}]'
-                )
         # ------------------------------------------------------------
         buy_price = market.c_quantize_order_price(
             self.trading_pair, buy_price
@@ -1584,12 +1179,12 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             self.trading_pair, sell_price
         )
 
-        buy_size = market.quantize_order_amount(
+        buy_size = market.c_quantize_order_amount(
             self.trading_pair,
             self.c_base_order_size(buy_price)
         )
 
-        sell_size = market.quantize_order_amount(
+        sell_size = market.c_quantize_order_amount(
             self.trading_pair,
             self.c_base_order_size(sell_price)
         )
@@ -1639,7 +1234,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         if quote_balance < buy_size:
             adjusted_amount = quote_balance / (proposal.buy.price * (Decimal("1") + buy_fee.percent))
             # adjusted_amount = quote_balance / proposal.buy.price
-            adjusted_amount = market.quantize_order_amount(self.trading_pair, adjusted_amount)
+            adjusted_amount = market.c_quantize_order_amount(self.trading_pair, adjusted_amount)
             self.logger().debug(
                 f'Not enough balance for BUY order '
                 f'(Size: {proposal.buy.size.normalize()}, '
@@ -1654,7 +1249,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
         # Adjust sell order size to use remaining balance if less than the order amount
         if base_balance < sell_size:
-            adjusted_amount = market.quantize_order_amount(self.trading_pair, base_balance)
+            adjusted_amount = market.c_quantize_order_amount(self.trading_pair, base_balance)
             self.logger().debug(
                 f'Not enough balance for SELL order '
                 f'(Size: {proposal.sell.size.normalize()}, '
@@ -1694,7 +1289,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         cur_orders = self.active_orders
         spread = s_decimal_zero
         if proposal.buy.size > s_decimal_zero:
-            spread = abs(proposal.buy.price - self.get_price()) / self.get_price()
+            spread = self.target_to_spread(proposal.buy.price)
             self.logger().info(
                 f"({proposal.market}) Creating BUY order "
                 f"price: {proposal.buy}: "
@@ -1711,7 +1306,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             )
             orders_created = True
         if proposal.sell.size > s_decimal_zero:
-            spread = abs(proposal.sell.price - self.get_price()) / self.get_price()
+            spread = self.target_to_spread(proposal.sell.price)
             self.logger().info(
                 f"({proposal.market}) Creating ASK order "
                 f"price: {proposal.sell}: "
@@ -1748,41 +1343,16 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                 self.logger().info(
                     f"{self.trading_pair} "
                     f"market volatility has changed: "
-                    f"{self._last_vol:.4} (V2S: {self._c_vol_to_spread(self._last_vol):.4}) "
-                    f"-> {self.volatility:.4} (V2S: {self._c_vol_to_spread(self.volatility):.4})"
+                    f"{self._last_vol:.4} (V2S:"
+                    f"{self._c_vol_to_spread(self._last_vol):.4}%) "
+                    f"-> {self.volatility:.4} (V2S:"
+                    f"{self._c_vol_to_spread(self.volatility):.4}%)"
                 )
             self._last_vol_reported = self.current_timestamp
             self._last_vol = self.volatility
 
     cdef _c_vol_to_spread(self, volatility: Decimal):
         return volatility * self.volatility_to_spread_multiplier * Decimal(100)
-
-    cdef c_update_order_book(self):
-        """update_order_book.
-        """
-        book = self._get_order_book()
-        self._order_book = book
-        if self._last_book_reported <= self.current_timestamp - \
-                self._order_book_log_interval:
-            self.log_order_book(book)
-            self._last_book_reported = self.current_timestamp
-
-    def get_price(self) -> Decimal:
-        price_provider = self._asset_price_delegate or self.market_info
-        if self.price_type is PriceType.LastOwnTrade:
-            price = self._last_own_trade_price
-        elif self.price_type is PriceType.InventoryCost:
-            price = price_provider.get_price_by_type(PriceType.MidPrice)
-        else:
-            price = price_provider.get_price_by_type(self.price_type)
-
-        if price.is_nan():
-            price = price_provider.get_price_by_type(PriceType.MidPrice)
-
-        return price
-
-    def get_mid_price(self) -> Decimal:
-        return self.c_get_mid_price()
 
     cdef object c_get_mid_price(self):
         cdef:
@@ -1811,24 +1381,15 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                         order.client_order_id
                     )
 
-    def has_inflight_cancel(self, order_id: str):
-        return self._sb_order_tracker.has_in_flight_cancel(order_id)
-
-    cdef bint c_is_within_tolerance(self, list cur_orders, object proposal):
-        """
-        False if there are no buys or sells or if the difference between the proposed price and current price is less
-        than the tolerance. The tolerance value is strict max, cannot be equal.
-        """
-        cur_buy = [o for o in cur_orders if o.is_buy]
-        cur_sell = [o for o in cur_orders if not o.is_buy]
-        if (cur_buy and proposal.buy.size <= 0) or (cur_sell and proposal.sell.size <= 0):
+    cdef bint c_is_within_tolerance(self, list current_prices, list proposal_prices):
+        if len(current_prices) != len(proposal_prices):
             return False
-        if cur_buy and \
-                abs(proposal.buy.price - cur_buy[0].price) / cur_buy[0].price > self.order_refresh_tolerance_pct:
-            return False
-        if cur_sell and \
-                abs(proposal.sell.price - cur_sell[0].price) / cur_sell[0].price > self.order_refresh_tolerance_pct:
-            return False
+        current_prices = sorted(current_prices)
+        proposal_prices = sorted(proposal_prices)
+        for current, proposal in zip(current_prices, proposal_prices):
+            # if spread diff is more than the tolerance or order quantities are different, return false.
+            if abs(proposal - current) / current > self._order_refresh_tolerance_pct:
+                return False
         return True
 
     cdef c_cancel_over_tolerance_orders(self, object proposal):
@@ -1843,14 +1404,23 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         if len(active_orders) == 0 or proposal is None:
             return
 
-        if not self.c_is_within_tolerance(active_orders, proposal):
-            self.logger().info('Cancelling orders due to high tolerance...')
-            for order in self.active_orders:
-                if not self.has_inflight_cancel(order.client_order_id):
-                    self.c_cancel_order(
-                        self.market_info,
-                        order.client_order_id
-                    )
+        if proposal is not None and \
+                self._order_refresh_tolerance_pct >= 0:
+
+            active_buy_prices = [Decimal(str(o.price)) for o in active_orders if o.is_buy]
+            active_sell_prices = [Decimal(str(o.price)) for o in active_orders if not o.is_buy]
+            proposal_buys = [proposal.buy.price] if proposal.buy.size > 0 else []
+            proposal_sells = [proposal.sell.price] if proposal.sell.size > 0 else []
+
+            if not self.c_is_within_tolerance(active_buy_prices, proposal_buys):
+                for order in active_orders:
+                    if order.is_buy:
+                        self.c_cancel_order(self._market_info, order.client_order_id)
+
+            if not self.c_is_within_tolerance(active_sell_prices, proposal_sells):
+                for order in active_orders:
+                    if not order.is_buy:
+                        self.c_cancel_order(self._market_info, order.client_order_id)
 
     cdef c_ignore_orders_below_min_amount(self, object proposal):
         if proposal.buy.size * proposal.buy.price < Decimal(self._min_order_usdt):
@@ -1897,13 +1467,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                     f"{self.exchange.name} is ready. Trading started."
                 )
                 self._start_time = self.current_timestamp
-        # Check elapsed time for restart, based on restart_every_seconds
-        # value.
-        t_elapsed = self.current_timestamp - self._start_time
-        if t_elapsed >= self._restart_every_seconds and \
-            self._restart_every_seconds > 0:
-            self.logger().warning('Restarting...')
-            self._hb_app.restart()
 
         self.c_update_volatility()
         if not self._vol_indicator.is_sampling_buffer_full:
@@ -1914,24 +1477,21 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                 f' [{c_size}/{vb_size}]'
             )
             return
-        self.c_update_order_book()
 
         proposal = None
+
         if self._create_timestamp <= self._current_timestamp:
             # Update the position based on the requested volume in front
-            self.calculate_positions_from_volume_in_front()
+            # self.calculate_positions_from_volume_in_front()
             # Create base proposal based on order book position.
             # If the relevant parameters are set to zero, the proposal will have
             # zero amount.
             proposal = self.c_create_proposal_from_order_book_pos()
-            self.update_proposal_from_volatility(proposal)
+            self.c_update_proposal_from_volatility(proposal)
 
             if self._bits_behind > 0:
                 self.c_apply_bits_behind(proposal, self._bits_behind)
 
-            self._token_balances = self.c_get_adjusted_available_balance(
-                self.active_orders
-            )
             # Set ignore_over_spread parameter for this feature.
             # Ignores Orders proposals with spread > ignore_over_spread
             if self._ignore_over_spread > Decimal('0'):
@@ -1939,9 +1499,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
             if self.moving_price_band_enabled:
                 self.c_apply_moving_price_band(proposal)
-            # Apply the ping-pong feature
-            if self._ping_pong_enabled:
-                self.c_apply_ping_pong(proposal)
 
             # Apply functions that modify orders size
             if self._inventory_skew_enabled:
@@ -1949,7 +1506,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             # Apply budget constraint, i.e. can't buy/sell more than what you have.
             self.c_apply_budget_constraint(proposal)
             # Ignore orders with size lower than the min ammount
-            self.c_ignore_orders_below_min_amount(proposal)
 
         try:
             self.cleanup_shadow_orders()
@@ -1961,14 +1517,20 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             self.logger().info(e)
 
     cdef c_apply_bits_behind(self, object proposal, int steps):
-        quantum = self.exchange.get_order_price_quantum(
+        cdef:
+            ExchangeBase market = self.exchange
+        quantum_buy = market.c_get_order_price_quantum(
             self.trading_pair,
-            self.get_price()
+            proposal.buy.price
+        )
+        quantum_sell = market.c_get_order_price_quantum(
+            self.trading_pair,
+            proposal.sell.price
         )
         if proposal.buy.size > 0:
-            proposal.buy.price -= quantum * steps
+            proposal.buy.price -= Decimal(quantum_buy * steps)
         if proposal.sell.size > 0:
-            proposal.sell.price += quantum * steps
+            proposal.sell.price += Decimal(quantum_sell * steps)
 
     cdef c_apply_moving_price_band(self, object proposal):
         price = self.get_price()
@@ -1999,3 +1561,51 @@ cdef class SmartLiquidityStrategy(StrategyBase):
             return PriceType.Custom
         else:
             raise ValueError(f"Unrecognized price type string {price_type_str}.")
+
+    def apply_ignore_over_spread(self, proposal: Proposal) -> bool:
+        """apply_ignore_over_spread.
+        If the calculated Order proposal spread is higher than the
+        value of ignore_over_spread parameter, then the proposal is ignored.
+        Works for both BUY and SELL orders.
+
+        Args:
+            proposal (Proposal): proposal
+        """
+        buy_spread = self.target_to_spread(proposal.buy.price)
+        sell_spread = self.target_to_spread(proposal.sell.price)
+        if buy_spread > self._ignore_over_spread:
+            proposal.buy.size = Decimal(0)
+            self.logger().info(
+                'Ignoring BUY Proposal due to high spread: '
+                f'ignore_over_spread = {self.ignore_over_spread * Decimal(100)}%'
+            )
+            return True
+        if sell_spread > self._ignore_over_spread:
+            proposal.sell.size = Decimal(0)
+            self.logger().info(
+                'Ignoring SELL Proposal due to high spread: '
+                f'ignore_over_spread = {self.ignore_over_spread * Decimal(100)}%'
+            )
+            return True
+        return False
+
+    def has_inflight_cancel(self, order_id: str):
+        return self._sb_order_tracker.has_in_flight_cancel(order_id)
+
+    def get_price(self) -> Decimal:
+        price_provider = self._asset_price_delegate or self.market_info
+        if self.price_type is PriceType.LastOwnTrade:
+            price = self._last_own_trade_price
+        elif self.price_type is PriceType.InventoryCost:
+            price = price_provider.get_price_by_type(PriceType.MidPrice)
+        else:
+            price = price_provider.get_price_by_type(self.price_type)
+
+        if price.is_nan():
+            price = price_provider.get_price_by_type(PriceType.MidPrice)
+
+        return price
+
+    def get_mid_price(self) -> Decimal:
+        return self.c_get_mid_price()
+
