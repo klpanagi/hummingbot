@@ -33,6 +33,7 @@ from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.rate_oracle.rate_oracle import RateOracle
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.core.utils.estimate_fee import estimate_fee
+from hummingbot.core.utils import map_df_to_str
 from hummingbot.logger import HummingbotLogger
 from hummingbot.model.trade_fill import TradeFill
 from hummingbot.strategy.__utils__.ring_buffer import RingBuffer
@@ -151,7 +152,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self._price_type = self.get_price_type(price_type)
 
         self._filled_sell_orders_count = 0
-        self._ready_to_trade = False
+        self._all_markets_ready = False
         self._token_balances = {}
         self._last_vol_reported = 0.
         self._ev_loop = asyncio.get_event_loop()
@@ -192,11 +193,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         self.c_add_markets([self.exchange])
 
     # --------------- Read-Only Properties ------------------
-
-    @property
-    def ready_to_trade(self) -> bool:
-        return self._ready_to_trade
-
     @property
     def exchange(self) -> ExchangeBase:
         return self.market_info.market
@@ -561,7 +557,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
     # ------------ END of Dynamic Reconfigure Parameters ---------------
 
-    async def active_orders_df(self) -> pd.DataFrame:
+    def active_orders_df(self) -> pd.DataFrame:
         """
         Return the active orders in a DataFrame.
         """
@@ -697,58 +693,65 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         df.sort_values(by=["Market"], inplace=True)
         return df
 
-    async def format_status(self) -> str:
-        """
-        Return the budget, market, miner and order statuses.
-        """
-        if not self._ready_to_trade:
+    def assets_df(self, to_show_current_pct: bool) -> pd.DataFrame:
+        market, trading_pair, base_asset, quote_asset = self.market_info
+        price = self.market_info.get_mid_price()
+        base_balance = float(market.get_balance(base_asset))
+        quote_balance = float(market.get_balance(quote_asset))
+        available_base_balance = float(market.get_available_balance(base_asset))
+        available_quote_balance = float(market.get_available_balance(quote_asset))
+        base_value = base_balance * float(price)
+        total_in_quote = base_value + quote_balance
+        base_ratio = base_value / total_in_quote if total_in_quote > 0 else 0
+        quote_ratio = quote_balance / total_in_quote if total_in_quote > 0 else 0
+        data=[
+            ["", base_asset, quote_asset],
+            ["Total Balance", round(base_balance, 4), round(quote_balance, 4)],
+            ["Available Balance", round(available_base_balance, 4), round(available_quote_balance, 4)],
+            [f"Current Value ({quote_asset})", round(base_value, 4), round(quote_balance, 4)]
+        ]
+        if to_show_current_pct:
+            data.append(["Current %", f"{base_ratio:.1%}", f"{quote_ratio:.1%}"])
+        df = pd.DataFrame(data=data)
+        return df
+
+    def format_status(self) -> str:
+        if not self._all_markets_ready:
             return "Market connectors are not ready."
-        lines = []
-        warning_lines = []
+        cdef:
+            list lines = []
+            list warning_lines = []
         warning_lines.extend(self.network_warning([self.market_info]))
 
-        budget_df = self.budget_status_df()
-        lines.extend(
-            ["", "  Budget:"] +
-            ["    " + line for line in budget_df.to_string(
-                index=False, header=False).split("\n")]
+        markets_df = map_df_to_str(
+            self.market_status_data_frame()
         )
+        lines.extend(["", "  Markets:"] + ["    " + line for line in markets_df.to_string(index=False).split("\n")])
 
-        inventory_skew_df = self.inventory_skew_stats_data_frame()
-        lines.extend(
-            ["", "  Inventory Skew Stats:"] +
-            ["    " + line for line in inventory_skew_df.to_string(
-                index=False, header=False).split("\n")]
-        )
+        assets_df = map_df_to_str(self.assets_df(not self.inventory_skew_enabled))
+        # append inventory skew stats.
+        if self.inventory_skew_enabled:
+            inventory_skew_df = map_df_to_str(self.inventory_skew_stats_data_frame())
+            assets_df = assets_df.append(inventory_skew_df)
 
-        market_df = self.market_status_data_frame()
-        lines.extend(
-            ["", "  Markets:"] +
-            ["    " + line for line in market_df.to_string(index=False).split("\n")]
-        )
+        first_col_length = max(*assets_df[0].apply(len))
+        df_lines = assets_df.to_string(index=False, header=False,
+                                       formatters={0: ("{:<" + str(first_col_length) + "}").format}).split("\n")
+        lines.extend(["", "  Assets:"] + ["    " + line for line in df_lines])
 
-        miner_df = await self.miner_status_df()
-        if not miner_df.empty:
-            lines.extend(
-                ["", "  Miner:"] +
-                ["    " + line for line in miner_df.to_string(index=False).split("\n")]
-            )
-
-        # See if there are any open orders.
+        # See if there're any open orders.
         if len(self.active_orders) > 0:
-            df = await self.active_orders_df()
-            lines.extend(
-                ["", "  Orders:"] +
-                ["    " + line for line in df.to_string(index=False).split("\n")]
-            )
+            df = map_df_to_str(self.active_orders_df())
+            lines.extend(["", "  Orders:"] + ["    " + line for line in df.to_string(index=False).split("\n")])
         else:
             lines.extend(["", "  No active maker orders."])
 
-        warning_lines.extend(self.balance_warning([self.market_info]))
+        warning_lines.extend(self.balance_warning([self._market_info]))
+
         if len(warning_lines) > 0:
             lines.extend(["", "*** WARNINGS ***"] + warning_lines)
-        return "\n".join(lines)
 
+        return "\n".join(lines)
 
     def stop(self, clock: Clock):
         """stop.
@@ -1446,24 +1449,26 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         if self._cancel_timestamp <= self._current_timestamp:
             self._cancel_timestamp = min(self._create_timestamp, next_cycle)
 
-    cdef c_tick(self, timestamp: float):
+    def all_markets_ready(self):
+        return all([market.ready for market in self._sb_markets])
+
+    cdef c_tick(self, timestamp: double):
         """
         Clock tick entry point, is run every second (on normal tick setting).
         :param timestamp: current tick timestamp
         """
         StrategyBase.c_tick(self, timestamp)
-        if not self._ready_to_trade:
-            self._ready_to_trade = self.exchange.ready and \
-                len(self.exchange.limit_orders) == 0
-            if self._asset_price_delegate is not None and self._ready_to_trade:
+        if not self._all_markets_ready:
+            self._all_markets_ready = all([market.ready for market in self._sb_markets])
+            if self._asset_price_delegate is not None and self._all_markets_ready:
                 self._all_markets_ready = self._asset_price_delegate.ready
-            if not self.exchange.ready:
+            if not self._all_markets_ready:
                 self.logger().warning(
                     f"{self.exchange.name} is not ready. Please wait..."
                 )
                 return
             else:
-                self.logger().warning(
+                self.logger().info(
                     f"{self.exchange.name} is ready. Trading started."
                 )
                 self._start_time = self.current_timestamp

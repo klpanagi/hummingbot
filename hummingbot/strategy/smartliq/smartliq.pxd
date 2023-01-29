@@ -44,7 +44,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
         int _filled_buy_orders_count
         int _filled_sell_orders_count
-        bint _ready_to_trade
+        bint _all_markets_ready
         int _refresh_time
         object _token_balances
         object _mid_price_buffer
