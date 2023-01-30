@@ -68,6 +68,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         object _price_type
 
     cdef c_update_volatility(self)
+    cdef c_calculate_positions_from_volume_in_front(self)
     cdef object c_create_proposal_from_order_book_pos(self)
     cdef c_update_proposal_from_volatility(self, object proposal)
     cdef _c_vol_to_spread(self, object volatility)

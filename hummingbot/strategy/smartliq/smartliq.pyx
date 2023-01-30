@@ -761,23 +761,27 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         """
         pass
 
-    def calculate_positions_from_volume_in_front(self):
+    cdef c_calculate_positions_from_volume_in_front(self):
         if self._sell_volume_in_front >= 0:
-            for pos in range(1, len(self._order_book['ask_volume'])):
-                if sum(self._order_book['ask_volume'][0:pos]) > self._sell_volume_in_front:
+            for pos in range(1, len(self.order_book.snapshot[1]['amount'])):
+                if sum(self.order_book.snapshot[1]['amount'][0:pos]) > self._sell_volume_in_front:
                     self._calculated_sell_position = pos + 1
                     break
             # if requested volume can't be found, go to the end of the order book
             self._calculated_sell_position = (
-                self._calculated_sell_position or len(self._order_book['ask_volume']))
+                self._calculated_sell_position or
+                len(self.order_book.snapshot[1]['amount'])
+            )
         if self._buy_volume_in_front >= 0:
-            for pos in range(1, len(self._order_book['bid_volume'])):
-                if sum(self._order_book['bid_volume'][0:pos]) > self._buy_volume_in_front:
+            for pos in range(1, len(self.order_book.snapshot[0]['amount'])):
+                if sum(self.order_book.snapshot[0]['amount'][0:pos]) > self._buy_volume_in_front:
                     self._calculated_buy_position = pos + 1
                     break
             # if requested volume can't be found, go to the end of the order book
             self._calculated_buy_position = (
-                self._calculated_buy_position or len(self._order_book['bid_volume']))
+                self._calculated_buy_position or
+                len(self.order_book.snapshot[0]['amount'])
+            )
 
     cdef c_update_proposal_from_volatility(self, proposal: Proposal):
         """update_proposal_from_volatility.
@@ -1487,7 +1491,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
 
         if self._create_timestamp <= self._current_timestamp:
             # Update the position based on the requested volume in front
-            # self.calculate_positions_from_volume_in_front()
+            self.c_calculate_positions_from_volume_in_front()
             # Create base proposal based on order book position.
             # If the relevant parameters are set to zero, the proposal will have
             # zero amount.
