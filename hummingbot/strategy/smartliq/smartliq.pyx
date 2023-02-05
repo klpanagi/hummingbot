@@ -1038,36 +1038,6 @@ cdef class SmartLiquidityStrategy(StrategyBase):
     def _get_order_book(self):
         return self.exchange.order_books[self.trading_pair]
 
-    def log_positions(self, book: pd.DataFrame) -> None:
-        order_idx = self.get_order_book_current_index()  # [0-.]
-        formatted = self.format_order_book(book)
-        orders = self.active_orders
-        orders_info = []
-        for order in orders:
-            if order.is_buy:
-                orders_info.append(
-                    f'Bid (buy) order - '
-                    f'price: {order.price:.6}, '
-                    f'size: {order.quantity}, '
-                    f'spread: {self.target_to_spread(order.price):.6%} '
-                    f'position: {self.order_book_index_from_price(order.price, True) + 1}\n'
-                )
-            else:
-                orders_info.append(
-                    f'Ask (sell) order - price: {order.price:.6}, '
-                    f'size: {order.quantity}, '
-                    f'spread: {self.target_to_spread(order.price):.6%} '
-                    f'position: {self.order_book_index_from_price(order.price, False) + 1}\n'
-                )
-        header = f"Positions - " \
-                 f"Exchance: {self.exchange.name} | " \
-                 f"Market: {self.trading_pair} | " \
-                 f"Ref Price: {self.get_price():.6} | " \
-                 f"Volatility: {self.volatility:.6}\n" \
-                 "-" * 60 + "\n"
-        text = header + '\n'.join(orders_info)
-        self.logger().info(text)
-
     def get_order_book_current_index(self) -> Tuple[int, int]:
         book = self.exchange.order_books[self.trading_pair]
         orders = self.active_orders
@@ -1302,7 +1272,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
                 f"price: {proposal.buy}: "
                 f"value: {proposal.buy.size * proposal.buy.price:.2f} "
                 f"{proposal.quote()} "
-                f"spread: {spread:.2%}"
+                f"spread: {spread:.2%} "
             )
             self.c_buy_with_specific_market(
                 self.market_info,
@@ -1403,11 +1373,15 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         """
         Cancels active orders, checks if the order prices are within tolerance threshold
         """
+        if self._cancel_timestamp > self._current_timestamp:
+            return
+
         cdef:
             list active_orders = self.active_orders
             list active_buy_prices = []
             list active_sells = []
             bint to_defer_canceling = False
+
         if len(active_orders) == 0 or proposal is None:
             return
 
@@ -1462,6 +1436,7 @@ cdef class SmartLiquidityStrategy(StrategyBase):
         :param timestamp: current tick timestamp
         """
         StrategyBase.c_tick(self, timestamp)
+
         if not self._all_markets_ready:
             self._all_markets_ready = all([market.ready for market in self._sb_markets])
             if self._asset_price_delegate is not None and self._all_markets_ready:

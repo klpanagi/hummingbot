@@ -191,6 +191,11 @@ def load_parser(hummingbot: "HummingbotApplication", command_tabs) -> [ThrowingA
                              dest="token", help="The token who's value you want to get.")
     rate_parser.set_defaults(func=hummingbot.rate)
 
+    pnl_reset_parser = subparsers.add_parser(
+        'pnl_reset', help="Reset the PnL init timestamp."
+    )
+    pnl_reset_parser.set_defaults(func=hummingbot.pnl_reset)
+
     for name, command_tab in command_tabs.items():
         o_parser = subparsers.add_parser(name, help=command_tab.tab_class.get_command_help_message())
         for arg_name, arg_properties in command_tab.tab_class.get_command_arguments().items():

@@ -11,6 +11,7 @@ from .import_command import ImportCommand
 from .mqtt_command import MQTTCommand
 from .order_book_command import OrderBookCommand
 from .pmm_script_command import PMMScriptCommand
+from .pnl_reset_command import PnLResetCommand
 from .previous_strategy_command import PreviousCommand
 from .rate_command import RateCommand
 from .silly_commands import SillyCommands
@@ -40,4 +41,5 @@ __all__ = [
     StopCommand,
     TickerCommand,
     MQTTCommand,
+    PnLResetCommand,
 ]
